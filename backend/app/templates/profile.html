@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Your profile | Soccom{% endblock %}
+{% block content %}
+<section class="profile-layout">
+  <header class="profile-heading">
+    <p class="eyebrow">Account / Profile</p>
+    <h1>Your corner of Soccom.</h1>
+    <p>Keep the details that help your people recognize you.</p>
+  </header>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if request.query_params.get('saved') %}<p class="success" role="status">Profile saved.</p>{% endif %}
+  <form method="post" action="/profile" class="profile-form" hx-post="/profile" hx-target="#profile-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="profile-id">
+      <div class="avatar" aria-hidden="true">{{ user.display_name[:1]|upper }}</div>
+      <div><strong>{{ user.display_name }}</strong><span>@{{ user.username }}</span></div>
+    </div>
+    <label>Email address<input type="email" value="{{ user.email }}" disabled><small>Email changes are not available yet.</small></label>
+    <label>Display name<input name="display_name" value="{{ user.display_name }}" maxlength="80" required></label>
+    <label>Bio<textarea name="bio" rows="4" maxlength="280">{{ user.bio }}</textarea><small>Up to 280 characters.</small></label>
+    <div class="profile-actions">
+      <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save profile</button>
+      <span id="profile-result" aria-live="polite"></span>
+    </div>
+  </form>
+  <a class="button button-quiet profile-settings-link" href="/settings"><span class="material-symbols-rounded" aria-hidden="true">settings</span>Settings</a>
+  <form method="post" action="/logout" class="logout-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Sign out</button>
+  </form>
+</section>
+{% endblock %}

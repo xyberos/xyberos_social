@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Settings | Soccom{% endblock %}
+{% block content %}
+<section class="settings-layout">
+  <header class="settings-heading">
+    <div>
+      <p class="eyebrow">Account / Preferences</p>
+      <h1>Settings</h1>
+      <p>Choose what you see and what reaches your inbox.</p>
+    </div>
+    <a class="text-button" href="/profile"><span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>Profile</a>
+  </header>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if saved %}<p class="success" role="status">Settings saved.</p>{% endif %}
+  <form method="post" action="/settings" class="settings-form settings-preferences">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <section class="settings-section" aria-labelledby="updates-settings-title">
+      <div class="section-heading">
+        <p class="eyebrow">A finite window</p>
+        <h2 id="updates-settings-title">Updates</h2>
+      </div>
+      <div class="settings-fields">
+        <label>Sources
+          <select name="updates_source">
+            <option value="all" {% if user.updates_source == "all" %}selected{% endif %}>People + communities</option>
+            <option value="people" {% if user.updates_source == "people" %}selected{% endif %}>Followed people</option>
+            <option value="communities" {% if user.updates_source == "communities" %}selected{% endif %}>Joined communities</option>
+          </select>
+        </label>
+        <label>Time range
+          <select name="updates_days">
+            <option value="1" {% if user.updates_days == 1 %}selected{% endif %}>Past day</option>
+            <option value="7" {% if user.updates_days == 7 %}selected{% endif %}>Past 7 days</option>
+            <option value="30" {% if user.updates_days == 30 %}selected{% endif %}>Past 30 days</option>
+            <option value="90" {% if user.updates_days == 90 %}selected{% endif %}>Past 90 days</option>
+          </select>
+        </label>
+        <label>Items per batch
+          <select name="updates_limit">
+            <option value="1" {% if user.updates_limit == 1 %}selected{% endif %}>1 item</option>
+            <option value="5" {% if user.updates_limit == 5 %}selected{% endif %}>5 items</option>
+            <option value="10" {% if user.updates_limit == 10 %}selected{% endif %}>10 items</option>
+            <option value="20" {% if user.updates_limit == 20 %}selected{% endif %}>20 items</option>
+            <option value="50" {% if user.updates_limit == 50 %}selected{% endif %}>50 items</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="notifications-settings-title">
+      <div class="section-heading">
+        <p class="eyebrow">Your attention</p>
+        <h2 id="notifications-settings-title">Notifications</h2>
+      </div>
+      <label class="setting-toggle"><input type="checkbox" name="quiet_mode" value="true" {% if user.quiet_mode %}checked{% endif %}><span><strong>Quiet mode</strong><small>Pause new in-app notifications. Existing notifications remain in your inbox.</small></span></label>
+      <label class="setting-toggle"><input type="checkbox" name="notify_replies" value="true" {% if user.notify_replies %}checked{% endif %}><span><strong>Discussion replies</strong><small>Notify me when someone replies to my post or comment.</small></span></label>
+      <label class="setting-toggle"><input type="checkbox" name="notify_moderation" value="true" {% if user.notify_moderation %}checked{% endif %}><span><strong>Report outcomes</strong><small>Notify me when a moderator reviews a report I submitted.</small></span></label>
+    </section>
+    <button class="button button-primary settings-save" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save settings</button>
+  </form>
+
+  <section class="settings-section settings-data" aria-labelledby="account-data-title">
+    <div class="section-heading">
+      <p class="eyebrow">Your data</p>
+      <h2 id="account-data-title">Export or delete account</h2>
+    </div>
+    <p class="account-copy">Download a JSON copy of your profile, relationships, community activity, reports, active conversation history, and notifications.</p>
+    <a class="button button-quiet" href="/account/export"><span class="material-symbols-rounded" aria-hidden="true">download</span>Download account export</a>
+    <div class="deletion-warning">
+      <h3>Delete account</h3>
+      <p>Deletion immediately disables sign-in and anonymizes your profile. Your posts, comments, and conversation history remain attributed to “Deleted account.” Owned communities transfer to an active member, or are removed if no active member remains. This action cannot be undone.</p>
+      <form method="post" action="/account/delete" class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Current password<input type="password" name="password" autocomplete="current-password" required></label>
+        <label>Type DELETE to confirm<input name="confirmation" autocomplete="off" required></label>
+        <button class="button danger-action" type="submit"><span class="material-symbols-rounded" aria-hidden="true">delete_forever</span>Delete account</button>
+      </form>
+    </div>
+  </section>
+  <form method="post" action="/logout" class="logout-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Sign out</button>
+  </form>
+</section>
+{% endblock %}

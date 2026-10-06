@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Create community | Soccom{% endblock %}
+{% block content %}
+<section class="profile-layout community-create-layout">
+  <header class="profile-heading">
+    <p class="eyebrow">Start a gathering</p>
+    <h1>Create a community.</h1>
+    <p>Choose a clear name and decide whether anyone can find it.</p>
+  </header>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/communities" class="profile-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Community name<input name="name" value="{{ values.name if values else '' }}" maxlength="80" required></label>
+    <label>Community address<input name="slug" value="{{ values.slug if values else '' }}" maxlength="48" pattern="[a-z0-9]+(-[a-z0-9]+)*" required><small>Lowercase letters, numbers, and single hyphens</small></label>
+    <label>Description<textarea name="description" rows="4" maxlength="1000">{{ values.description if values else '' }}</textarea></label>
+    <label>Visibility
+      <select name="visibility">
+        <option value="public" {% if not values or values.visibility == 'public' %}selected{% endif %}>Public · anyone can browse and join</option>
+        <option value="private" {% if values and values.visibility == 'private' %}selected{% endif %}>Private · members only, invite required</option>
+      </select>
+    </label>
+    <div class="profile-actions">
+      <button class="button button-primary" type="submit">Create community</button>
+      <a class="button button-quiet" href="/communities">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Notifications | Soccom{% endblock %}
+{% block content %}
+<section class="notifications-layout">
+  <header class="notifications-heading">
+    <div>
+      <p class="eyebrow">Account / Inbox</p>
+      <h1>Notifications</h1>
+      <p>{{ unread_count }} unread</p>
+    </div>
+    <a class="button button-quiet" href="/profile"><span class="material-symbols-rounded" aria-hidden="true">tune</span>Notification settings</a>
+  </header>
+
+  {% if notifications %}
+    <div class="notification-actions">
+      {% if unread_count %}
+        <form method="post" action="/notifications/read-all">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">done_all</span>Mark all as read</button>
+        </form>
+      {% endif %}
+      <form method="post" action="/notifications/clear">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="text-button danger-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">delete_sweep</span>Clear notifications</button>
+      </form>
+    </div>
+    <div class="notification-list" aria-label="Your notifications">
+      {% for notification, actor in notifications %}
+        <article class="notification-row {% if not notification.read_at %}notification-unread{% endif %}">
+          <div class="notification-copy">
+            <div class="notification-meta">
+              <span>{{ "Reply" if notification.category == "reply" else "Moderation" }}</span>
+              <time datetime="{{ notification.created_at.isoformat() }}">{{ notification.created_at.strftime("%Y-%m-%d %H:%M") }}</time>
+            </div>
+            <p>{{ notification.message }}</p>
+            {% if notification.target_url %}<a class="notification-target" href="{{ notification.target_url }}">Open discussion</a>{% endif %}
+          </div>
+          {% if not notification.read_at %}
+            <form method="post" action="/notifications/{{ notification.id }}/read">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">done</span>Mark read</button>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+    <div class="notification-finish">
+      <span>Showing {{ count }} notifications</span>
+      {% if has_more %}<a class="button button-quiet" href="/notifications?limit={{ limit }}&amp;cursor={{ next_cursor }}">Load older</a>{% endif %}
+    </div>
+  {% else %}
+    <p class="notification-empty">You’re all caught up.</p>
+  {% endif %}
+</section>
+{% endblock %}

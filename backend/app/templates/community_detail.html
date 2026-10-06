@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ community.name }} | Soccom{% endblock %}
+{% block content %}
+<section class="community-layout">
+  <a class="back-link" href="/communities">← All communities</a>
+  {% if request.query_params.get('error') == 'blocked' %}<p class="alert" role="alert">A block prevents this invitation.</p>{% endif %}
+  {% if request.query_params.get('error') == 'member-not-found' %}<p class="alert" role="alert">No active account has that username.</p>{% endif %}
+  <header class="community-header">
+    <div class="community-mark community-mark-large" aria-hidden="true">{{ community.name[:1]|upper }}</div>
+    <div class="community-header-copy">
+      <p class="eyebrow">/c/{{ community.slug }} · {{ community.visibility }}</p>
+      <h1>{{ community.name }}</h1>
+      <p>{{ community.description or 'A place for people to talk about what they care about.' }}</p>
+      <span class="member-count">{{ members|length }} member{{ '' if members|length == 1 else 's' }}{% if role %} · your role: {{ role }}{% endif %}</span>
+    </div>
+    <div class="community-primary-action">
+      {% if user and role and role != 'owner' %}
+        <form method="post" action="/communities/{{ community.slug }}/leave">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Leave</button>
+        </form>
+      {% elif user and not role and community.visibility == 'public' %}
+        <form method="post" action="/communities/{{ community.slug }}/join">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>Join community</button>
+        </form>
+      {% elif not user %}
+        <a class="button button-primary" href="/login"><span class="material-symbols-rounded" aria-hidden="true">login</span>Sign in to join</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="members-section" aria-labelledby="members-title">
+    <div class="section-heading"><div><p class="eyebrow">The people here</p><h2 id="members-title">Members</h2></div></div>
+    {% if role in ['owner', 'moderator'] %}
+      <form method="post" action="/communities/{{ community.slug }}/members" class="invite-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="invite-username">Invite by username</label>
+        <div><input id="invite-username" name="username" placeholder="username" required><button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">person_add</span>Add member</button></div>
+      </form>
+    {% endif %}
+    <div class="member-list">
+      {% for membership, member in members %}
+        <article class="member-row">
+          <div class="person-avatar" aria-hidden="true">{{ member.display_name[:1]|upper }}</div>
+          <div class="person-info"><strong>{{ member.display_name }}</strong><span>@{{ member.username }}</span></div>
+          <span class="role-label">{{ membership.role }}</span>
+          {% if role == 'owner' and membership.role != 'owner' %}
+            <form method="post" action="/communities/{{ community.slug }}/members/{{ member.id }}/role" class="role-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <select name="role" aria-label="Role for {{ member.username }}">
+                <option value="member" {% if membership.role == 'member' %}selected{% endif %}>Member</option>
+                <option value="moderator" {% if membership.role == 'moderator' %}selected{% endif %}>Moderator</option>
+              </select>
+              <button class="text-button" type="submit">Save role</button>
+            </form>
+          {% endif %}
+          {% if (role == 'owner' and membership.role != 'owner') or (role == 'moderator' and membership.role == 'member') %}
+            <form method="post" action="/communities/{{ community.slug }}/members/{{ member.id }}/remove">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="text-button danger-button" type="submit">Remove</button>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+    {% if request.query_params.get('error') == 'invalid-post' %}<p class="alert" role="alert">Check the post title and length, then try again.</p>{% endif %}
+    {% if request.query_params.get('error') == 'duplicate-post' %}<p class="alert" role="alert">You recently posted the same title and text in this community.</p>{% endif %}
+
+  {% if events %}
+    <section class="audit-section" aria-labelledby="audit-title">
+      <div class="section-heading"><div><p class="eyebrow">Accountability</p><h2 id="audit-title">Recent admin activity</h2></div></div>
+      <ul class="audit-list">
+        {% for event in events %}<li><span>{{ event.action|replace('_', ' ')|title }}</span><span>{{ event.details }}</span></li>{% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+</section>
+{% endblock %}

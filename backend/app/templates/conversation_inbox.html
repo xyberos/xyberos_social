@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Inbox | Soccom{% endblock %}
+{% block content %}
+<section class="inbox-layout">
+  <header class="inbox-heading">
+    <div><p class="eyebrow">Your conversations</p><h1>Inbox</h1></div>
+    <a class="button button-primary" href="/conversations/new"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>New group</a>
+  </header>
+  <div class="inbox-list">
+    {% for item in conversations %}
+      <a class="inbox-row" href="/conversations/{{ item.conversation.id }}">
+        <div class="inbox-avatar" aria-hidden="true">{{ (item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title)[:1]|upper }}</div>
+        <div class="inbox-copy">
+          <div class="inbox-title-row">
+            <strong>{{ item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title }}</strong>
+            {% if item.latest %}<time datetime="{{ item.latest.created_at.isoformat() }}">{{ item.latest.created_at.strftime('%b %d · %H:%M') }}</time>{% endif %}
+          </div>
+          {% if item.latest %}<span class="inbox-preview">{% if item.latest.sender_id == user.id %}You: {% endif %}{{ item.latest.body[:100] }}</span>
+          {% elif item.conversation.kind == 'group' %}<span class="inbox-preview">{{ item.participants|length }} participants · No messages yet</span>
+          {% else %}<span class="inbox-preview">Start a conversation</span>{% endif %}
+        </div>
+        {% if item.blocked %}<span class="muted-status">Blocked</span>{% endif %}
+        {% if item.unread_count %}<span class="unread-count" aria-label="{{ item.unread_count }} unread messages">{{ item.unread_count }}</span>{% endif %}
+      </a>
+    {% else %}
+      <div class="inbox-empty">
+        <p class="eyebrow">A good place to begin</p>
+        <h2>Your inbox is quiet.</h2>
+        <p>Find someone you know and start a conversation.</p>
+        <a class="button button-primary" href="/people"><span class="material-symbols-rounded" aria-hidden="true">person_search</span>Find people</a>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

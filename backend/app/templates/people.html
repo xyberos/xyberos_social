@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}People | Soccom{% endblock %}
+{% block content %}
+<section class="directory-layout">
+  <header class="directory-heading">
+    <p class="eyebrow">Your social graph</p>
+    <h1>People</h1>
+    <p>Choose who to follow. Blocking removes follows in both directions.</p>
+  </header>
+  {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
+  <div class="directory-list">
+    {% for person in people %}
+      <article class="directory-row">
+        <div class="person-avatar" aria-hidden="true">{{ person.user.display_name[:1]|upper }}</div>
+        <div class="person-info">
+          <strong>{{ person.user.display_name }}</strong>
+          <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %}</span>
+        </div>
+        <div class="person-actions">
+          {% if not person.blocked and not person.blocked_you %}
+            <form method="post" action="/conversations/direct/{{ person.user.id }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-quiet" type="submit">Message</button>
+            </form>
+          {% endif %}
+          {% if person.blocked %}
+            <form method="post" action="/people/{{ person.user.id }}/unblock">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-quiet" type="submit">Unblock</button>
+            </form>
+          {% elif person.blocked_you %}
+            <span class="muted-status">They blocked you</span>
+          {% else %}
+            <form method="post" action="/people/{{ person.user.id }}/{{ 'unfollow' if person.following else 'follow' }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button {{ 'button-quiet' if person.following else 'button-primary' }}" type="submit">
+                {{ 'Following' if person.following else 'Follow' }}
+              </button>
+            </form>
+            <form method="post" action="/people/{{ person.user.id }}/block">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="text-button danger-button" type="submit">Block</button>
+            </form>
+          {% endif %}
+        </div>
+      </article>
+    {% else %}
+      <p class="empty-state">No other accounts yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

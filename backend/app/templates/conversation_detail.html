@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title }} | Chat | Soccom{% endblock %}
+{% block content %}
+<section class="chat-layout">
+  <a class="back-link" href="/conversations">← Inbox</a>
+  {% if request.query_params.get('error') == 'user-not-found' %}<p class="alert" role="alert">That username was not found.</p>{% endif %}
+  {% if request.query_params.get('error') == 'blocked' %}<p class="alert" role="alert">A block prevents this invitation.</p>{% endif %}
+  {% if request.query_params.get('error') == 'already-member' %}<p class="alert" role="status">That person is already in the group.</p>{% endif %}
+  {% if request.query_params.get('error') == 'group-full' %}<p class="alert" role="alert">Groups are limited to 20 participants.</p>{% endif %}
+  <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}" aria-label="Conversation">
+    <header class="chat-header">
+      <div class="inbox-avatar" aria-hidden="true">{{ (peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title)[:1]|upper }}</div>
+      <div class="chat-header-copy">
+        <h1>{{ peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title }}</h1>
+        {% if conversation.kind == 'direct' and peer %}<span>@{{ peer.user.username }}</span>
+        {% else %}<span>{{ participants|length }} participants</span>{% endif %}
+      </div>
+      <span id="chat-connection-state" class="connection-state" role="status">Connecting…</span>
+    </header>
+
+    {% if conversation.kind == 'group' %}
+      <div class="group-tools">
+        <div class="group-participants">{% for item in participants %}<div class="group-participant"><span>{{ item.user.display_name }} · @{{ item.user.username }}{% if item.membership.role == 'owner' %} · owner{% endif %}</span>
+          {% if conversation.created_by == user.id and item.user.id != user.id %}
+            <form method="post" action="/conversations/{{ conversation.id }}/members/{{ item.user.id }}/remove">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-button danger-button" type="submit">Remove</button>
+            </form>
+          {% endif %}
+        </div>{% endfor %}</div>
+        {% if conversation.created_by == user.id %}
+          <details class="group-invite"><summary>Add participant</summary>
+            <form method="post" action="/conversations/{{ conversation.id }}/members" class="report-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="visually-hidden" for="group-invite-username">Username to add</label>
+              <input id="group-invite-username" name="username" placeholder="username" required>
+              <button class="text-button" type="submit">Add</button>
+            </form>
+          </details>
+        {% elif conversation.created_by != user.id %}
+          <form method="post" action="/conversations/{{ conversation.id }}/leave">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="text-button danger-button" type="submit">Leave group</button>
+          </form>
+        {% endif %}
+      </div>
+      {% if events %}<div class="chat-events">{% for event in events %}<span>{{ event.details }}</span>{% endfor %}</div>{% endif %}
+    {% endif %}
+
+    {% if blocked %}<p class="locked-notice">Direct messages are blocked between these accounts. Earlier messages remain available.</p>{% endif %}
+    {% if has_older %}<a class="older-messages" href="/conversations/{{ conversation.id }}?before={{ older_cursor }}">Load earlier messages</a>{% endif %}
+    <div class="message-list" id="message-list" aria-live="polite" aria-relevant="additions text">
+      {% for item in messages %}
+        <article class="message-row {{ 'message-mine' if item.mine else 'message-theirs' }}" data-message-id="{{ item.message.id }}" data-sender-id="{{ item.sender.id }}">
+          {% if conversation.kind == 'group' and not item.mine %}<span class="message-sender">{{ item.sender.display_name }}</span>{% endif %}
+          <p class="message-bubble">{{ item.message.body }}</p>
+          <time datetime="{{ item.message.created_at.isoformat() }}">{{ item.message.created_at.strftime('%H:%M') }}{% if item.mine and peer_read_at and peer_read_at >= item.message.created_at %} · Read{% endif %}</time>
+        </article>
+      {% else %}<p class="empty-state message-empty">No messages yet. Say hello.</p>{% endfor %}
+    </div>
+
+    {% if not blocked %}
+      <form id="message-form" method="post" action="/conversations/{{ conversation.id }}/messages" class="message-compose">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="visually-hidden" for="message-body">Write a message</label>
+        <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message" required></textarea>
+        <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Send</button>
+        <span id="message-error" class="message-error" role="alert"></span>
+      </form>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

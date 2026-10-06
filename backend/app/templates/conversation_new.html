@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}New group | Soccom{% endblock %}
+{% block content %}
+<section class="profile-layout conversation-create-layout">
+  <header class="profile-heading">
+    <p class="eyebrow">Bring people together</p>
+    <h1>Start a group chat.</h1>
+    <p>Group messages are shared with everyone who joins this conversation.</p>
+  </header>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/conversations/groups" class="profile-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Group name<input name="title" value="{{ title or '' }}" maxlength="80" required></label>
+    <label>Participants<input name="usernames" value="{{ usernames or '' }}" maxlength="500" placeholder="alex, sam, jordan" required><small>Enter up to 19 usernames, separated by commas or spaces.</small></label>
+    <div class="profile-actions"><button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>Create group</button><a class="button button-quiet" href="/conversations"><span class="material-symbols-rounded" aria-hidden="true">close</span>Cancel</a></div>
+  </form>
+</section>
+{% endblock %}

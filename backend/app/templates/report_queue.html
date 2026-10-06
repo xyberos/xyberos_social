@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Moderation queue | {{ community.name }} | Soccom{% endblock %}
+{% block content %}
+<section class="directory-layout report-queue-layout">
+  <a class="back-link" href="/communities/{{ community.slug }}">← {{ community.name }}</a>
+  <header class="directory-heading">
+    <p class="eyebrow">Community moderation</p>
+    <h1>Open reports</h1>
+    <p>Review each report and record a decision. Content removal is visible in the moderation history.</p>
+  </header>
+  <div class="report-list">
+    {% for item in reports %}
+      <article class="report-card">
+        <div class="report-card-meta"><span>{{ item.report.target_type|title }} report</span><span>Reported by @{{ item.reporter.username if item.reporter else 'deleted user' }}</span><time datetime="{{ item.report.created_at.isoformat() }}">{{ item.report.created_at.strftime('%b %d, %Y · %H:%M') }}</time></div>
+        <h2>{{ item.post.title }}</h2>
+        <p class="reported-context">{% if item.report.target_type == 'comment' %}{{ item.target.body[:240] }}{% else %}{{ item.post.body[:240] }}{% endif %}</p>
+        <p class="report-reason"><strong>Reason</strong> {{ item.report.reason }}</p>
+        <a class="thread-link" href="/communities/{{ community.slug }}/posts/{{ item.post.id }}">Review discussion →</a>
+        <div class="report-decisions">
+          <form method="post" action="/communities/{{ community.slug }}/report-queue/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="dismiss">
+            <button class="button button-quiet" type="submit">Dismiss report</button>
+          </form>
+          <form method="post" action="/communities/{{ community.slug }}/report-queue/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="remove">
+            <button class="button button-primary" type="submit">Remove content</button>
+          </form>
+        </div>
+      </article>
+    {% else %}
+      <p class="empty-state">No open reports.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

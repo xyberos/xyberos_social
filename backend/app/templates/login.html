@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign in | Soccom{% endblock %}
+{% block content %}
+<section class="auth-layout auth-layout-login">
+  <div class="auth-aside">
+    <p class="eyebrow">Welcome back</p>
+    <h1>Your people,<br><em>your pace.</em></h1>
+    <p>Pick up where you left off. Your updates will still be there when you’re ready.</p>
+  </div>
+  <div class="auth-panel">
+    <div class="panel-heading">
+      <p class="eyebrow">Good to see you</p>
+      <h2>Sign in</h2>
+    </div>
+    {% if request.query_params.get('password_reset') %}<p class="success" role="status">Password updated. Sign in with your new password.</p>{% endif %}
+    {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/login" class="form-stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Email address<input name="email" type="email" autocomplete="email" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="forgot-row"><a href="/forgot-password">Forgot password?</a></div>
+      <button class="button button-primary button-wide" type="submit"><span class="material-symbols-rounded" aria-hidden="true">login</span>Sign in</button>
+    </form>
+    <p class="form-footnote">New to Soccom? <a href="/register">Create an account</a></p>
+  </div>
+</section>
+{% endblock %}

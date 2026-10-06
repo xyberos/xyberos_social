@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Communities | Soccom{% endblock %}
+{% block content %}
+<section class="directory-layout">
+  <header class="directory-heading heading-with-action">
+    <div>
+      <p class="eyebrow">Shared interests</p>
+      <h1>Communities</h1>
+      <p>Public communities are open to browse. Private spaces are invite-only.</p>
+    </div>
+    {% if user %}<a class="button button-primary" href="/communities/new"><span class="material-symbols-rounded" aria-hidden="true">add_circle</span>Create community</a>{% endif %}
+  </header>
+  <div class="directory-list">
+    {% for community in communities %}
+      <article class="community-row">
+        <div class="community-mark" aria-hidden="true">{{ community.name[:1]|upper }}</div>
+        <div class="community-info">
+          <a class="community-name" href="/communities/{{ community.slug }}">{{ community.name }}</a>
+          <span>/c/{{ community.slug }} · {{ community.visibility }}{% if roles.get(community.id) %} · {{ roles.get(community.id) }}{% endif %}</span>
+          <p>{{ community.description or 'A place for people to talk about what they care about.' }}</p>
+        </div>
+        {% if user and not roles.get(community.id) and community.visibility == 'public' %}
+          <form method="post" action="/communities/{{ community.slug }}/join">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>Join</button>
+          </form>
+        {% endif %}
+      </article>
+    {% else %}
+      <p class="empty-state">No communities yet. Start one around something you care about.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

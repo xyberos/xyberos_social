@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Soccom | Social, at your pace{% endblock %}
+{% block content %}
+<section class="home-layout">
+  <div class="home-copy">
+    <p class="eyebrow">A quieter kind of social</p>
+    <h1>Stay close.<br><em>Stay in control.</em></h1>
+    <p class="intro">Make room for good conversations without an endless stream asking for your attention.</p>
+    {% if user %}
+      <div class="action-row">
+        <a class="button button-primary" href="/conversations"><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span>Open your inbox</a>
+        <a class="button button-quiet" href="/communities"><span class="material-symbols-rounded" aria-hidden="true">groups</span>Browse communities</a>
+      </div>
+    {% else %}
+      <div class="action-row">
+        <a class="button button-primary" href="/register"><span class="material-symbols-rounded" aria-hidden="true">person_add</span>Create an account</a>
+        <a class="button button-quiet" href="/login"><span class="material-symbols-rounded" aria-hidden="true">login</span>Sign in</a>
+      </div>
+    {% endif %}
+  </div>
+  <aside class="home-note" aria-label="Product principle">
+    <span class="note-index">01 / YOUR ACCOUNT</span>
+    <p>Start with the people and communities you choose. The rest can wait.</p>
+    <span class="note-rule"></span>
+    <span class="note-caption">A finite social platform</span>
+  </aside>
+</section>
+{% endblock %}

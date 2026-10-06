@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
+    <title>{% block title %}Soccom{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0&family=Roboto+Flex:opsz,wght@8..144,400..700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script defer src="https://unpkg.com/htmx.org@2.0.4"></script>
+    {% if conversation_id is defined %}<script defer src="/static/chat.js"></script>{% endif %}
+  </head>
+  <body class="{{ 'signed-in' if user is defined and user else '' }}">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Soccom home">soccom<span>.</span></a>
+      <nav aria-label="Main navigation">
+        {% if user is defined and user %}
+          <a href="/conversations"><span class="material-symbols-rounded nav-icon" aria-hidden="true">chat_bubble</span>Chat</a>
+          <a href="/updates"><span class="material-symbols-rounded nav-icon" aria-hidden="true">dynamic_feed</span>Updates</a>
+          <a href="/notifications"><span class="material-symbols-rounded nav-icon" aria-hidden="true">notifications</span>Notifications</a>
+          <a href="/communities"><span class="material-symbols-rounded nav-icon" aria-hidden="true">groups</span>Communities</a>
+          <a href="/people"><span class="material-symbols-rounded nav-icon" aria-hidden="true">person_search</span>People</a>
+          <a class="nav-profile" href="/profile"><span class="material-symbols-rounded nav-icon" aria-hidden="true">account_circle</span>Profile</a>
+          <a class="nav-settings" href="/settings" aria-label="Settings"><span class="material-symbols-rounded nav-icon" aria-hidden="true">settings</span><span class="nav-label">Settings</span></a>
+        {% else %}
+          <a href="/login">Sign in</a>
+          <a class="nav-join" href="/register">Join</a>
+        {% endif %}
+      </nav>
+    </header>
+    <main id="main-content">
+      {% block content %}{% endblock %}
+    </main>
+    {% if user is defined and user %}
+      <nav class="mobile-tabbar" aria-label="Primary">
+        <a href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span><span>Chat</span></a>
+        <a href="/updates" {% if request.url.path.startswith('/updates') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">dynamic_feed</span><span>Updates</span></a>
+        <a href="/communities" {% if request.url.path.startswith('/communities') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">groups</span><span>Groups</span></a>
+        <a href="/notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">notifications</span><span>Alerts</span></a>
+        <a href="/people" {% if request.url.path.startswith('/people') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">person_search</span><span>People</span></a>
+      </nav>
+    {% endif %}
+    <footer class="site-footer">
+      <span>Soccom</span>
+      <span>Communication, on your terms.</span>
+    </footer>
+  </body>
+</html>
