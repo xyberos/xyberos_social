@@ -85,8 +85,12 @@ Attachment bytes need object storage. Start it and create the bucket once:
 ```powershell
 docker compose up -d object-storage
 $env:PYTHONPATH = "backend"
-.\.venv\Scripts\python.exe -c "from app.core.storage import get_storage; get_storage().ensure_bucket()"
+.\.venv\Scripts\python.exe -c "from app.core.storage import bootstrap_bucket; print(bootstrap_bucket())"
 ```
+
+That creates the bucket and allows browser uploads from `APP_BASE_URL` (plus both loopback names
+outside production). The CORS rule is not optional: a browser posts attachment bytes straight to
+storage, so without it every upload fails in the browser *after* the bytes have been stored.
 
 That service is moto, an S3 API implementation intended for development and CI. It keeps state
 in memory, so attachments do not survive a restart of it, and it does not enforce the upload
@@ -129,7 +133,7 @@ Create the `soccom_test` database once against the Compose PostgreSQL instance b
 - `GET /readyz` is readiness: it runs `SELECT 1` and answers `503 {"status": "unavailable"}` when the database is unreachable, so traffic can be drained without killing the process.
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.
-- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle and Google Fonts) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far.
+- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, and the configured object-storage origin that browsers upload attachments to) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one.
 - `GET /metrics` exposes `soccom_http_requests_total`, `soccom_http_request_duration_seconds`, `soccom_uptime_seconds`, `soccom_db_pool_connections`, `soccom_outbox_unpublished_events`, and `soccom_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
 - `ops/` holds the beta evidence and procedures. `alerts.yml` carries rules for error rate, latency, pool saturation, stuck idempotency keys, outbox backlog, and restore-rehearsal staleness; `runbooks.md` says what to do for each and lists the owners this phase still needs; `rehearse-restore.ps1` dumps the database, restores it into a scratch database, and compares every table's row count and the migration revision; `loadtest.py` measures p95 latency and error rate against documented budgets.
 - Accessibility is asserted rather than assumed: `backend/tests/test_accessibility.py` parses every rendered page and fails on a missing document language, an unlabelled control, an image without `alt`, a button with no accessible name, or a positive `tabindex`.
@@ -176,6 +180,15 @@ client to retry instead of promoting unverified bytes. Abandoned uploads are rea
 next target is issued, and deleting an account removes its objects before its rows. Markup and
 SVG are refused outright rather than scanned, because no scan verdict makes them safe to serve
 from the application's origin.
+
+Two things outside the application have to be right for uploads to work, and both fail in ways
+that look like a broken attachment rather than a configuration problem:
+
+- The bucket must allow the application's origin, because the browser posts bytes straight to
+  storage. `bootstrap_bucket()` applies that rule; a real deployment sets it on its bucket.
+- The application's `Content-Security-Policy` must name the storage origin in `connect-src`, or
+  the browser refuses the request before it leaves the page. That origin is added automatically
+  from `S3_ENDPOINT_URL`, and only that origin is added.
 
 Two deliberate boundaries: attachments are **not** end-to-end encrypted, because scanning and
 moderation need readable bytes (Decision 15) — they are encrypted at rest by the storage

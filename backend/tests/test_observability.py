@@ -68,6 +68,30 @@ def test_application_routes_keep_the_strict_csp(client):
     assert "'unsafe-inline'" not in policy
 
 
+def test_csp_allows_the_configured_storage_origin(client, monkeypatch):
+    """A presigned upload posts bytes straight to storage, so the browser needs that origin."""
+    monkeypatch.setattr(
+        "app.api.middleware.get_settings",
+        lambda: Settings(s3_endpoint_url="https://objects.example.com"),
+    )
+
+    policy = client.get("/healthz").headers["content-security-policy"]
+
+    assert "connect-src 'self' https://objects.example.com;" in policy
+    # Only the configured origin is added, and only to connect-src.
+    assert "script-src 'self' https://unpkg.com" in policy
+
+
+def test_csp_omits_a_storage_origin_when_unset(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.middleware.get_settings", lambda: Settings(s3_endpoint_url=None)
+    )
+
+    policy = client.get("/healthz").headers["content-security-policy"]
+
+    assert "connect-src 'self';" in policy
+
+
 def test_hsts_only_when_running_in_production(client, monkeypatch):
     production = Settings(
         app_env="production",

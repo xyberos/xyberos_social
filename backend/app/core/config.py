@@ -1,7 +1,13 @@
+"""Settings, including the validation that fails fast in production."""
+
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# backend/app/core/config.py -> the repository root.
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -37,7 +43,12 @@ class Settings(BaseSettings):
     clamav_host: str | None = None
     clamav_port: int = 3310
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The working directory and the repository root are both consulted, so starting uvicorn
+    # from `backend/` finds the same `.env` as starting it from the root. Real environment
+    # variables always win over either file, which is how a deployment supplies its settings.
+    model_config = SettingsConfigDict(
+        env_file=(".env", str(PROJECT_ROOT / ".env")), extra="ignore"
+    )
 
     @property
     def json_logs(self) -> bool:

@@ -16,9 +16,11 @@ The policy fixes the key, so a client cannot choose where its upload lands.
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
 from botocore.client import Config as BotoClientConfig
@@ -65,8 +67,14 @@ class ObjectStorage:
             ),
         )
 
-    def ensure_bucket(self) -> None:
-        """Create the bucket when it is missing. Intended for local and CI setups."""
+    def ensure_bucket(self, cors_origins: Sequence[str] = ()) -> None:
+        """Create the bucket when it is missing and apply the browser upload policy.
+
+        A browser posts attachment bytes straight to this service, which is a cross-origin
+        request: without a CORS policy naming the application's origin, every upload fails in
+        the browser *after* the bytes have already been stored. Applying the policy is
+        idempotent, so this is safe to run on every deploy.
+        """
         try:
             self._client.head_bucket(Bucket=self.bucket)
         except ClientError:
@@ -75,6 +83,29 @@ class ObjectStorage:
                 logger.info("created bucket", extra={"event": "storage.bucket_created"})
             except (BotoCoreError, ClientError) as error:
                 raise StorageError(f"could not create bucket {self.bucket!r}") from error
+        if cors_origins:
+            self.apply_cors(cors_origins)
+
+    def apply_cors(self, origins: Sequence[str]) -> None:
+        rules = [
+            {
+                "AllowedOrigins": list(origins),
+                "AllowedMethods": ["POST", "GET", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 300,
+            }
+        ]
+        try:
+            self._client.put_bucket_cors(
+                Bucket=self.bucket, CORSConfiguration={"CORSRules": rules}
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError("could not apply the bucket CORS policy") from error
+        logger.info(
+            "applied bucket CORS",
+            extra={"event": "storage.cors_applied", "origins": len(list(origins))},
+        )
 
     def presign_post(
         self, key: str, *, content_type: str, max_bytes: int, expires_in: int
@@ -154,3 +185,20 @@ def get_storage() -> ObjectStorage:
         secret_access_key=settings.s3_secret_access_key,
         use_path_style=settings.s3_use_path_style,
     )
+
+
+def bootstrap_bucket() -> list[str]:
+    """Create the bucket and allow browser uploads from the application's own origin."""
+    settings = get_settings()
+    origins = {settings.app_base_url.rstrip("/")}
+    if settings.app_env != "production":
+        parsed = urlparse(settings.app_base_url)
+        if parsed.hostname in {"localhost", "127.0.0.1"}:
+            port = f":{parsed.port}" if parsed.port else ""
+            # A development server is reached as both loopback names, and a mismatch between
+            # the configured origin and the one in the address bar silently blocks uploads.
+            origins.add(f"{parsed.scheme}://localhost{port}")
+            origins.add(f"{parsed.scheme}://127.0.0.1{port}")
+    resolved = sorted(origins)
+    get_storage().ensure_bucket(resolved)
+    return resolved

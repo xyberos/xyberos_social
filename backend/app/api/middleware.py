@@ -2,6 +2,9 @@
 
 import logging
 import time
+from functools import lru_cache
+from urllib.parse import urlparse
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.api.deps import client_key
@@ -13,16 +16,41 @@ from app.core.scoping import ScopeViolation
 logger = logging.getLogger(__name__)
 
 
-_APP_CSP = (
-    "default-src 'self'; script-src 'self' https://unpkg.com; "
-    "style-src 'self' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
-    # connect-src covers the same-origin chat WebSocket.
-    "connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
-)
+def _storage_origin(endpoint_url: str | None) -> str | None:
+    """The one extra origin a browser may connect to: the configured object storage."""
+    if not endpoint_url:
+        return None
+    parsed = urlparse(endpoint_url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.hostname}{port}"
+
+
+@lru_cache(maxsize=8)
+def _app_csp(endpoint_url: str | None) -> str:
+    """The application policy, plus the storage origin a presigned upload posts bytes to.
+
+    Without that origin in `connect-src` the browser refuses the direct upload, which is the
+    whole point of issuing a presigned target instead of proxying attachment bytes through the
+    application. Only the configured origin is added.
+    """
+    connect_sources = ["'self'"]
+    origin = _storage_origin(endpoint_url)
+    if origin:
+        connect_sources.append(origin)
+    return (
+        "default-src 'self'; script-src 'self' https://unpkg.com; "
+        "style-src 'self' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
+        # connect-src covers the same-origin chat WebSocket and the attachment upload target.
+        f"connect-src {' '.join(connect_sources)}; base-uri 'self'; "
+        "frame-ancestors 'none'; form-action 'self'"
+    )
+
 
 # FastAPI's generated docs pull Swagger UI and ReDoc from jsDelivr and bootstrap them with an
-# inline script, so they cannot render under _APP_CSP.
+# inline script, so they cannot render under the application policy.
 _DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc"}
 _DOCS_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -41,8 +69,11 @@ async def add_security_headers(request: Request, call_next):
     # A route may set its own deliberate policy (attachment delivery serves stored media under
     # a narrower one); everything else gets the application policy for its route class.
     if "Content-Security-Policy" not in response.headers:
+        settings = get_settings()
         response.headers["Content-Security-Policy"] = (
-            _DOCS_CSP if request.url.path in _DOCS_PATHS else _APP_CSP
+            _DOCS_CSP
+            if request.url.path in _DOCS_PATHS
+            else _app_csp(settings.s3_endpoint_url)
         )
     if get_settings().app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
