@@ -77,6 +77,10 @@ async def add_security_headers(request: Request, call_next):
         )
     if get_settings().app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Stylesheets and scripts are not content-hashed, so a heuristic freshness window keeps a
+    # returning browser on yesterday's CSS after a deploy. Revalidating is cheap and correct.
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 

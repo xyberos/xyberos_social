@@ -581,3 +581,28 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .upload-progress:empty {
   display: none;
 }
+
+/* Discussions: the composer and the community's posts. */
+.posts-section { margin: 0 0 34px; }
+
+.post-compose {
+  max-width: 640px;
+  margin: 0 0 22px;
+  display: grid;
+  gap: 8px;
+}
+
+.post-compose label { font-size: 12px; font-weight: 650; }
+.post-compose .field-note { color: var(--muted); font-weight: 500; }
+.post-compose textarea { resize: vertical; }
+.post-compose button { justify-self: start; }
+
+.posts-hint { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+
+.post-list { display: grid; max-width: 720px; }
+
+.post-row { padding: 14px 0; }
+.post-row + .post-row { border-top: 1px solid rgba(0, 0, 0, 0.08); }
+.post-row h3 { margin: 0 0 4px; font-size: 16px; }
+.post-meta { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+.post-excerpt { margin: 0; font-size: 13px; line-height: 1.5; }

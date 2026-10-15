@@ -39,6 +39,38 @@ def join_community(client, slug: str):
     )
 
 
+def test_community_page_shows_the_composer_and_its_posts(client_factory):
+    owner = client_factory()
+    member = client_factory()
+    outsider = client_factory()
+    assert create_account(owner, "owner@example.com", "owner").status_code == 303
+    assert create_account(member, "member@example.com", "member").status_code == 303
+    assert create_account(outsider, "outsider@example.com", "outsider").status_code == 303
+    create_community(owner, "composer-lab")
+    assert join_community(member, "composer-lab").status_code == 303
+    create_post(owner, "composer-lab", "First topic")
+
+    owner_page = owner.get("/communities/composer-lab")
+    assert 'action="/communities/composer-lab/posts"' in owner_page.text
+    assert "First topic" in owner_page.text
+
+    # A plain member sees the composer too, and their post appears for everyone else.
+    member_page = member.get("/communities/composer-lab")
+    assert 'action="/communities/composer-lab/posts"' in member_page.text
+    member_post = member.post(
+        "/communities/composer-lab/posts",
+        data={"csrf_token": csrf_from(member_page.text), "title": "Member topic", "body": ""},
+        follow_redirects=False,
+    )
+    assert member_post.status_code == 303
+    assert "Member topic" in owner.get("/communities/composer-lab").text
+
+    # A signed-in non-member is told to join rather than shown a form that would refuse them.
+    outsider_page = outsider.get("/communities/composer-lab")
+    assert 'action="/communities/composer-lab/posts"' not in outsider_page.text
+    assert "Join this community to start a discussion." in outsider_page.text
+
+
 def test_posts_nested_comments_membership_and_moderator_lock(client_factory):
     owner = client_factory()
     member = client_factory()

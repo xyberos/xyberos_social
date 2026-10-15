@@ -68,6 +68,14 @@ def test_application_routes_keep_the_strict_csp(client):
     assert "'unsafe-inline'" not in policy
 
 
+def test_static_assets_revalidate_instead_of_being_cached_heuristically(client):
+    response = client.get("/static/styles.css")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
 def test_csp_allows_the_configured_storage_origin(client, monkeypatch):
     """A presigned upload posts bytes straight to storage, so the browser needs that origin."""
     monkeypatch.setattr(

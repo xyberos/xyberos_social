@@ -30,6 +30,41 @@
     </div>
   </header>
 
+  {# Posting is the primary action in a community, so the composer and the discussions sit
+     above the member list. Creation errors arrive as query parameters from the redirect the
+     create endpoint already used; the composer was the missing half of that flow. #}
+  <section class="posts-section" aria-labelledby="posts-title">
+    <div class="section-heading"><div><p class="eyebrow">In order, at your own pace</p><h2 id="posts-title">Discussions</h2></div></div>
+    {% if request.query_params.get('error') == 'invalid-post' %}<p class="alert" role="alert">Check the post title and length, then try again.</p>{% endif %}
+    {% if request.query_params.get('error') == 'duplicate-post' %}<p class="alert" role="alert">You recently posted the same title and text in this community.</p>{% endif %}
+    {% if request.query_params.get('error') == 'slow-down' %}<p class="alert" role="alert">You are posting quickly. Wait a moment and try again.</p>{% endif %}
+
+    {% if role %}
+      <form method="post" action="/communities/{{ community.slug }}/posts" class="post-compose">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="post-title">Title</label>
+        <input id="post-title" name="title" maxlength="140" required placeholder="What should this discussion be about?">
+        <label for="post-body">Text <span class="field-note">optional</span></label>
+        <textarea id="post-body" name="body" rows="4" maxlength="10000" placeholder="Add the context other members need."></textarea>
+        <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">edit_square</span>Post</button>
+      </form>
+    {% elif user %}
+      <p class="posts-hint">Join this community to start a discussion.</p>
+    {% endif %}
+
+    <div class="post-list">
+      {% for post, author in posts %}
+        <article class="post-row">
+          <h3><a href="/communities/{{ community.slug }}/posts/{{ post.id }}">{{ post.title }}</a></h3>
+          <p class="post-meta">@{{ author.username }} · {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}{% if post.is_locked %} · locked{% endif %}</p>
+          {% if post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
+        </article>
+      {% else %}
+        <p class="updates-empty">No discussions yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="members-section" aria-labelledby="members-title">
     <div class="section-heading"><div><p class="eyebrow">The people here</p><h2 id="members-title">Members</h2></div></div>
     {% if role in ['owner', 'moderator'] %}
@@ -65,8 +100,6 @@
       {% endfor %}
     </div>
   </section>
-    {% if request.query_params.get('error') == 'invalid-post' %}<p class="alert" role="alert">Check the post title and length, then try again.</p>{% endif %}
-    {% if request.query_params.get('error') == 'duplicate-post' %}<p class="alert" role="alert">You recently posted the same title and text in this community.</p>{% endif %}
 
   {% if events %}
     <section class="audit-section" aria-labelledby="audit-title">
