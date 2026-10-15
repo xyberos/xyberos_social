@@ -13,7 +13,8 @@ _test_client_counter = itertools.count(1)
 
 
 @pytest.fixture
-def client_factory():
+def database_factory():
+    """Session factory over an isolated in-memory database, for asserting stored rows."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -22,8 +23,16 @@ def client_factory():
     TestingSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
 
+    yield TestingSession
+
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture
+def client_factory(database_factory):
     def override_get_db():
-        database = TestingSession()
+        database = database_factory()
         try:
             yield database
         finally:
@@ -45,8 +54,6 @@ def client_factory():
     for test_client in test_clients:
         test_client.close()
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(engine)
-    engine.dispose()
 
 
 @pytest.fixture

@@ -23,6 +23,9 @@ APPLICATION_TABLES = {
     "conversations",
     "conversation_messages",
     "notifications",
+    "platform_audit_events",
+    "outbox_events",
+    "idempotency_keys",
 }
 
 

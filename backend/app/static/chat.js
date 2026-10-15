@@ -77,6 +77,24 @@
   }
 
   if (messageForm) {
+    // One key per logical message: a retry after a lost response replays the stored
+    // outcome instead of posting the message twice, while editing the text produces a
+    // different key because the request content changed. The fallback covers origins
+    // where crypto.randomUUID is unavailable because the page is not a secure context.
+    const newIdempotencyKey = () => {
+      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    };
+    let attemptKey = null;
+    let attemptBody = null;
+    const idempotencyKeyFor = (body) => {
+      if (attemptBody !== body) {
+        attemptBody = body;
+        attemptKey = newIdempotencyKey();
+      }
+      return attemptKey;
+    };
+
     messageForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const bodyField = messageForm.elements.namedItem("body");
@@ -84,10 +102,12 @@
       if (!bodyField.value.trim() || sendButton.disabled) return;
       sendButton.disabled = true;
       messageError.textContent = "";
+      const data = new FormData(messageForm);
+      data.set("idempotency_key", idempotencyKeyFor(bodyField.value));
       try {
         const response = await fetch(messageForm.action, {
           method: "POST",
-          body: new FormData(messageForm),
+          body: data,
           headers: { "X-Chat-Request": "true" },
         });
         if (!response.ok) {
@@ -95,6 +115,8 @@
           throw new Error(error.detail || "Message could not be sent.");
         }
         appendMessage(await response.json());
+        attemptKey = null;
+        attemptBody = null;
         bodyField.value = "";
         bodyField.focus();
       } catch (error) {

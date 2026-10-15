@@ -2,8 +2,10 @@
 
 from app.models.identity import User, UserSession, PasswordResetToken
 from app.models.social import UserRelationship
+from app.models.audit import PlatformAuditEvent
 from app.models.communities import Community, CommunityMembership, CommunityAuditEvent
 from app.models.content import Post, Comment, ContentReport, ModerationEvent
+from app.models.idempotency import IdempotencyKey
 from app.models.messaging import (
     Conversation,
     ConversationMember,
@@ -11,6 +13,7 @@ from app.models.messaging import (
     ConversationEvent,
 )
 from app.models.notifications import Notification
+from app.models.outbox import OutboxEvent
 
 __all__ = [
     "Comment",
@@ -22,9 +25,12 @@ __all__ = [
     "ConversationEvent",
     "ConversationMember",
     "ConversationMessage",
+    "IdempotencyKey",
     "ModerationEvent",
     "Notification",
+    "OutboxEvent",
     "PasswordResetToken",
+    "PlatformAuditEvent",
     "Post",
     "User",
     "UserRelationship",

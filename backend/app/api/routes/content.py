@@ -14,8 +14,10 @@ from app.api.deps import (
     current_session,
 )
 from app.api.responses import render
+from app.core import events
 from app.core.database import get_db
 from app.models import Comment, ContentReport, ModerationEvent, Post, User
+from app.core.scoping import community_scope
 from app.core.security import check_rate_limit
 from app.services.authorization import (
     blocked_user_ids,
@@ -28,6 +30,7 @@ from app.services.authorization import (
 )
 from app.services.communities import add_moderation_event
 from app.services.notifications import queue_notification
+from app.services.outbox import enqueue_event
 
 router = APIRouter()
 
@@ -65,6 +68,15 @@ def create_post(
         return RedirectResponse(f"/communities/{slug}?error=duplicate-post", status_code=303)
     post = Post(community_id=community.id, author_id=user.id, title=title, body=body)
     database.add(post)
+    database.flush()
+    enqueue_event(
+        database,
+        event=events.POST_CREATED,
+        aggregate_type="post",
+        aggregate_id=post.id,
+        scope=community_scope(community.id),
+        payload={"community_id": str(community.id), "author_id": str(user.id)},
+    )
     database.commit()
     return RedirectResponse(f"/communities/{slug}/posts/{post.id}", status_code=303)
 
@@ -194,6 +206,19 @@ def create_comment(
         recipient_ids.add(parent.author_id)
     comment = Comment(post_id=post.id, author_id=user.id, parent_id=parent_id, body=body)
     database.add(comment)
+    database.flush()
+    enqueue_event(
+        database,
+        event=events.COMMENT_CREATED,
+        aggregate_type="comment",
+        aggregate_id=comment.id,
+        scope=community_scope(community.id),
+        payload={
+            "community_id": str(community.id),
+            "post_id": str(post.id),
+            "author_id": str(user.id),
+        },
+    )
     for recipient_id in recipient_ids:
         recipient = database.get(User, recipient_id)
         if recipient is not None:
@@ -229,7 +254,15 @@ def remove_post(
         post.removed_at = datetime.now(UTC)
         post.removed_by_user_id = user.id
         if role in {"owner", "moderator"}:
-            add_moderation_event(database, community.id, user.id, "post", post.id, "post_removed")
+            add_moderation_event(
+                database,
+                community.id,
+                user.id,
+                "post",
+                post.id,
+                "post_removed",
+                event=events.POST_REMOVED,
+            )
         database.commit()
     return RedirectResponse(f"/communities/{slug}", status_code=303)
 
@@ -258,6 +291,7 @@ def set_post_lock(
             "post",
             post.id,
             "post_locked" if locked else "post_unlocked",
+            event=events.POST_LOCKED if locked else events.POST_UNLOCKED,
         )
         database.commit()
     return RedirectResponse(f"/communities/{slug}/posts/{post.id}", status_code=303)
@@ -285,7 +319,13 @@ def remove_comment(
     comment.removed_by_user_id = user.id
     if role in {"owner", "moderator"}:
         add_moderation_event(
-            database, community.id, user.id, "comment", comment.id, "comment_removed"
+            database,
+            community.id,
+            user.id,
+            "comment",
+            comment.id,
+            "comment_removed",
+            event=events.COMMENT_REMOVED,
         )
     database.commit()
     return RedirectResponse(f"/communities/{slug}/posts/{post.id}#comments", status_code=303)

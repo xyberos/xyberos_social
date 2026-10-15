@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.deps import authenticated_form_user, authenticated_user, current_session, form_context
 from app.api.responses import render
+from app.core import events
 from app.core.database import get_db
 from app.models import Community, CommunityAuditEvent, CommunityMembership, Post, User
 from app.services.authorization import (
@@ -18,6 +19,7 @@ from app.services.authorization import (
     is_blocked_between,
     require_community_manager,
 )
+from app.services.communities import record_community_audit
 
 router = APIRouter()
 
@@ -124,13 +126,14 @@ def create_community(
     database.add(community)
     database.flush()
     database.add(CommunityMembership(community_id=community.id, user_id=user.id, role="owner"))
-    database.add(
-        CommunityAuditEvent(
-            community_id=community.id,
-            actor_user_id=user.id,
-            action="community_created",
-            details=f"Created {visibility} community {slug}",
-        )
+    record_community_audit(
+        database,
+        community,
+        event=events.COMMUNITY_CREATED,
+        action="community_created",
+        actor_user_id=user.id,
+        details=f"Created {visibility} community {slug}",
+        after_state={"name": name, "slug": slug, "visibility": visibility},
     )
     try:
         database.commit()
@@ -252,14 +255,15 @@ def invite_community_member(
         database.add(
             CommunityMembership(community_id=community.id, user_id=target.id, role="member")
         )
-        database.add(
-            CommunityAuditEvent(
-                community_id=community.id,
-                actor_user_id=user.id,
-                target_user_id=target.id,
-                action="member_invited",
-                details=f"Added @{target.username} as a member",
-            )
+        record_community_audit(
+            database,
+            community,
+            event=events.COMMUNITY_MEMBER_INVITED,
+            action="member_invited",
+            actor_user_id=user.id,
+            target_user_id=target.id,
+            details=f"Added @{target.username} as a member",
+            after_state={"role": "member"},
         )
         database.commit()
     return RedirectResponse(f"/communities/{slug}", status_code=303)
@@ -285,14 +289,16 @@ def update_community_role(
     previous_role = membership.role
     if previous_role != role:
         membership.role = role
-        database.add(
-            CommunityAuditEvent(
-                community_id=community.id,
-                actor_user_id=user.id,
-                target_user_id=membership.user_id,
-                action="role_changed",
-                details=f"Changed role from {previous_role} to {role}",
-            )
+        record_community_audit(
+            database,
+            community,
+            event=events.COMMUNITY_ROLE_CHANGED,
+            action="role_changed",
+            actor_user_id=user.id,
+            target_user_id=membership.user_id,
+            details=f"Changed role from {previous_role} to {role}",
+            before_state={"role": previous_role},
+            after_state={"role": role},
         )
         database.commit()
     return RedirectResponse(f"/communities/{slug}", status_code=303)
@@ -314,14 +320,15 @@ def remove_community_member(
         raise HTTPException(status_code=404, detail="Member not found.")
     if actor_role != "owner" and membership.role != "member":
         raise HTTPException(status_code=403, detail="Moderators may remove members only.")
-    database.add(
-        CommunityAuditEvent(
-            community_id=community.id,
-            actor_user_id=user.id,
-            target_user_id=membership.user_id,
-            action="member_removed",
-            details=f"Removed @{membership.user.username} from the community",
-        )
+    record_community_audit(
+        database,
+        community,
+        event=events.COMMUNITY_MEMBER_REMOVED,
+        action="member_removed",
+        actor_user_id=user.id,
+        target_user_id=membership.user_id,
+        details=f"Removed @{membership.user.username} from the community",
+        before_state={"role": membership.role},
     )
     database.delete(membership)
     database.commit()

@@ -10,7 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.deps import authenticated_form_user, authenticated_user, current_session, form_context
 from app.api.responses import redirect_people, render
+from app.core import events
 from app.core.database import get_db
+from app.core.scoping import conversation_scope
 from app.models import (
     Conversation,
     ConversationEvent,
@@ -19,13 +21,16 @@ from app.models import (
     User,
 )
 from app.core.security import check_rate_limit
+from app.services import idempotency
 from app.services.authorization import is_blocked_between
 from app.services.messaging import (
     active_conversation_member,
     conversation_sockets,
     direct_conversation_key,
     message_payload,
+    record_conversation_event,
 )
+from app.services.outbox import enqueue_event
 
 router = APIRouter()
 
@@ -141,6 +146,14 @@ def start_direct_conversation(
                 ),
             ]
         )
+        enqueue_event(
+            database,
+            event=events.CONVERSATION_CREATED,
+            aggregate_type="conversation",
+            aggregate_id=conversation.id,
+            scope=conversation_scope(conversation.id),
+            payload={"kind": "direct", "created_by": str(user.id)},
+        )
         try:
             database.commit()
         except IntegrityError:
@@ -213,6 +226,14 @@ def create_group_conversation(
     database.add(conversation)
     database.flush()
     database.add(ConversationMember(conversation_id=conversation.id, user_id=user.id, role="owner"))
+    enqueue_event(
+        database,
+        event=events.CONVERSATION_CREATED,
+        aggregate_type="conversation",
+        aggregate_id=conversation.id,
+        scope=conversation_scope(conversation.id),
+        payload={"kind": "group", "created_by": str(user.id)},
+    )
     for participant in participants:
         database.add(
             ConversationMember(
@@ -221,14 +242,15 @@ def create_group_conversation(
                 role="member",
             )
         )
-        database.add(
-            ConversationEvent(
-                conversation_id=conversation.id,
-                actor_user_id=user.id,
-                subject_user_id=participant.id,
-                action="member_added",
-                details=f"@{participant.username} was added to the group",
-            )
+        record_conversation_event(
+            database,
+            conversation.id,
+            event=events.CONVERSATION_MEMBER_ADDED,
+            action="member_added",
+            actor_user_id=user.id,
+            subject_user_id=participant.id,
+            details=f"@{participant.username} was added to the group",
+            after_state={"role": "member"},
         )
     database.commit()
     return RedirectResponse(f"/conversations/{conversation.id}", status_code=303)
@@ -382,14 +404,15 @@ async def invite_conversation_member(
     else:
         membership.left_at = None
         membership.last_read_at = None
-    database.add(
-        ConversationEvent(
-            conversation_id=conversation.id,
-            actor_user_id=user.id,
-            subject_user_id=target.id,
-            action="member_added",
-            details=f"@{target.username} was added to the group",
-        )
+    record_conversation_event(
+        database,
+        conversation.id,
+        event=events.CONVERSATION_MEMBER_ADDED,
+        action="member_added",
+        actor_user_id=user.id,
+        subject_user_id=target.id,
+        details=f"@{target.username} was added to the group",
+        after_state={"role": "member"},
     )
     database.commit()
     await conversation_sockets.broadcast(
@@ -422,14 +445,16 @@ async def remove_conversation_member(
         raise HTTPException(status_code=409, detail="The group owner cannot be removed.")
     target = database.get(User, target_id)
     target_membership.left_at = datetime.now(UTC)
-    database.add(
-        ConversationEvent(
-            conversation_id=conversation.id,
-            actor_user_id=user.id,
-            subject_user_id=target_id,
-            action="member_removed",
-            details=f"@{target.username if target else 'member'} was removed from the group",
-        )
+    record_conversation_event(
+        database,
+        conversation.id,
+        event=events.CONVERSATION_MEMBER_REMOVED,
+        action="member_removed",
+        actor_user_id=user.id,
+        subject_user_id=target_id,
+        details=f"@{target.username if target else 'member'} was removed from the group",
+        before_state={"left_at": None},
+        after_state={"left_at": "set"},
     )
     database.commit()
     await conversation_sockets.broadcast(
@@ -460,14 +485,16 @@ async def leave_group_conversation(
     if membership.role == "owner":
         raise HTTPException(status_code=409, detail="The group owner cannot leave.")
     membership.left_at = datetime.now(UTC)
-    database.add(
-        ConversationEvent(
-            conversation_id=conversation.id,
-            actor_user_id=user.id,
-            subject_user_id=user.id,
-            action="member_left",
-            details=f"@{user.username} left the group",
-        )
+    record_conversation_event(
+        database,
+        conversation.id,
+        event=events.CONVERSATION_MEMBER_LEFT,
+        action="member_left",
+        actor_user_id=user.id,
+        subject_user_id=user.id,
+        details=f"@{user.username} left the group",
+        before_state={"left_at": None},
+        after_state={"left_at": "set"},
     )
     database.commit()
     await conversation_sockets.broadcast(
@@ -503,6 +530,7 @@ async def send_conversation_message(
     request: Request,
     body: str = Form(),
     csrf_token: str = Form(),
+    idempotency_key: str | None = Form(default=None),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
@@ -529,6 +557,18 @@ async def send_conversation_message(
         raise HTTPException(status_code=422, detail="Message must contain 1–5,000 characters.")
     if not check_rate_limit(str(user.id), f"message:{conversation.id}", limit=60, seconds=60):
         raise HTTPException(status_code=429, detail="You are sending messages too quickly.")
+    key = idempotency.presented_key(request, idempotency_key)
+    reservation = None
+    if key is not None:
+        reservation = idempotency.begin(
+            database,
+            scope=idempotency.actor_scope(user.id),
+            key=key,
+            endpoint="send_conversation_message",
+            fingerprint=idempotency.request_fingerprint(conversation.id, body),
+        )
+        if reservation.replay is not None:
+            return idempotency.replay_response(reservation.replay)
     message = ConversationMessage(
         conversation_id=conversation.id,
         sender_id=user.id,
@@ -536,8 +576,27 @@ async def send_conversation_message(
     )
     database.add(message)
     membership.last_read_at = datetime.now(UTC)
-    database.commit()
+    database.flush()
     payload = message_payload(message, user)
+    enqueue_event(
+        database,
+        event=events.MESSAGE_CREATED,
+        aggregate_type="conversation_message",
+        aggregate_id=message.id,
+        scope=conversation_scope(conversation.id),
+        payload={"conversation_id": str(conversation.id), "sender_id": str(user.id)},
+    )
+    if reservation is not None:
+        if request.headers.get("X-Chat-Request") == "true":
+            idempotency.complete(database, reservation, status_code=200, body=payload)
+        else:
+            idempotency.complete(
+                database,
+                reservation,
+                status_code=303,
+                location=f"/conversations/{conversation.id}",
+            )
+    database.commit()
     await conversation_sockets.broadcast(
         conversation.id,
         {"type": "message", "message": payload},

@@ -9,7 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.deps import allow_request, authenticated_form_user, authenticated_user, current_session
 from app.api.responses import render
+from app.core import events
 from app.core.database import get_db
+from app.core.scoping import community_scope
 from app.models import Comment, ContentReport, Post, User
 from app.services.authorization import (
     find_post,
@@ -19,6 +21,7 @@ from app.services.authorization import (
 )
 from app.services.communities import add_moderation_event
 from app.services.notifications import queue_notification
+from app.services.outbox import enqueue_event
 
 router = APIRouter()
 
@@ -66,6 +69,16 @@ def report_content(
             target_id=target_id,
             reason=reason,
         )
+    )
+    # The report reason stays in content_reports only: it is redacted when the reporter's
+    # account is deleted, so it never belongs in a published event payload.
+    enqueue_event(
+        database,
+        event=events.POST_REPORTED if target_type == "post" else events.COMMENT_REPORTED,
+        aggregate_type=target_type,
+        aggregate_id=target_id,
+        scope=community_scope(community.id),
+        payload={"community_id": str(community.id), "reporter_id": str(user.id)},
     )
     try:
         database.commit()
@@ -168,6 +181,9 @@ def resolve_report(
                 target.id,
                 f"{report.target_type}_removed",
                 report.reason,
+                event=events.POST_REMOVED
+                if report.target_type == "post"
+                else events.COMMENT_REMOVED,
             )
         report.status = "resolved"
     else:
@@ -182,6 +198,9 @@ def resolve_report(
         report.id,
         f"report_{report.status}",
         report.reason,
+        event=events.REPORT_RESOLVED
+        if report.status == "resolved"
+        else events.REPORT_DISMISSED,
     )
     reporter = database.get(User, report.reporter_id)
     if reporter is not None:

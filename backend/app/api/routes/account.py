@@ -15,7 +15,9 @@ from app.api.deps import (
     session_cookie_name,
 )
 from app.api.responses import render
+from app.core import events
 from app.core.database import get_db
+from app.core.scoping import account_scope
 from app.models import (
     Comment,
     Community,
@@ -35,7 +37,9 @@ from app.models import (
     UserSession,
 )
 from app.core.security import hash_password, new_token, verify_password
-from app.services.communities import delete_unowned_community
+from app.services.audit import record_audit
+from app.services.communities import delete_unowned_community, record_community_audit
+from app.services.outbox import enqueue_event
 
 router = APIRouter()
 
@@ -385,14 +389,16 @@ def delete_account(
         successor_membership, successor = successor_row
         successor_membership.role = "owner"
         community.created_by = successor.id
-        database.add(
-            CommunityAuditEvent(
-                community_id=community.id,
-                actor_user_id=None,
-                target_user_id=successor.id,
-                action="owner_transferred",
-                details="Ownership transferred after the owner's account was deleted.",
-            )
+        record_community_audit(
+            database,
+            community,
+            event=events.COMMUNITY_OWNERSHIP_TRANSFERRED,
+            action="owner_transferred",
+            actor_user_id=None,
+            target_user_id=successor.id,
+            details="Ownership transferred after the owner's account was deleted.",
+            before_state={"owner_user_id": str(user.id)},
+            after_state={"owner_user_id": str(successor.id)},
         )
 
     database.query(CommunityMembership).filter(CommunityMembership.user_id == user.id).delete(
@@ -419,6 +425,23 @@ def delete_account(
     user.bio = ""
     user.password_hash = hash_password(new_token())
     user.is_active = False
+    record_audit(
+        database,
+        action=events.ACCOUNT_DELETED,
+        scope=account_scope(user.id),
+        actor_user_id=user.id,
+        target_type="account",
+        target_id=user.id,
+        reason="Owner confirmed deletion with their current password.",
+    )
+    enqueue_event(
+        database,
+        event=events.ACCOUNT_DELETED,
+        aggregate_type="account",
+        aggregate_id=user.id,
+        scope=account_scope(user.id),
+        payload={"username": user.username},
+    )
     database.commit()
 
     response = RedirectResponse("/account-deleted", status_code=303)

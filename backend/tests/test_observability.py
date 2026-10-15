@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 
+import pytest
 from fastapi import Request
 from sqlalchemy.exc import OperationalError
 
@@ -47,6 +48,24 @@ def test_security_headers_cover_framing_and_connections(client):
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert "connect-src 'self'" in response.headers["content-security-policy"]
     assert "strict-transport-security" not in response.headers
+
+
+@pytest.mark.parametrize("path", ["/docs", "/docs/oauth2-redirect", "/redoc"])
+def test_docs_pages_get_a_csp_that_allows_the_swagger_assets(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    policy = response.headers["content-security-policy"]
+    assert "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in policy
+    assert "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in policy
+
+
+def test_application_routes_keep_the_strict_csp(client):
+    policy = client.get("/healthz").headers["content-security-policy"]
+
+    assert "script-src 'self' https://unpkg.com" in policy
+    assert "https://cdn.jsdelivr.net" not in policy
+    assert "'unsafe-inline'" not in policy
 
 
 def test_hsts_only_when_running_in_production(client, monkeypatch):

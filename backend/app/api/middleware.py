@@ -7,8 +7,28 @@ from fastapi.responses import JSONResponse
 from app.api.deps import client_key
 from app.core.config import get_settings
 from app.core.observability import REQUEST_ID_HEADER, request_id_var, resolve_request_id
+from app.core.scoping import ScopeViolation
 
 logger = logging.getLogger(__name__)
+
+
+_APP_CSP = (
+    "default-src 'self'; script-src 'self' https://unpkg.com; "
+    "style-src 'self' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
+    # connect-src covers the same-origin chat WebSocket.
+    "connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+)
+
+# FastAPI's generated docs pull Swagger UI and ReDoc from jsDelivr and bootstrap them with an
+# inline script, so they cannot render under _APP_CSP.
+_DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc"}
+_DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://fastapi.tiangolo.com; object-src 'none'; "
+    "connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+)
 
 
 async def add_security_headers(request: Request, call_next):
@@ -18,11 +38,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' https://unpkg.com; "
-        "style-src 'self' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
-        # connect-src covers the same-origin chat WebSocket.
-        "connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        _DOCS_CSP if request.url.path in _DOCS_PATHS else _APP_CSP
     )
     if get_settings().app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -79,8 +95,23 @@ async def unhandled_error_response(request: Request, exc: Exception) -> JSONResp
     )
 
 
+async def scope_violation_response(request: Request, exc: Exception) -> JSONResponse:
+    """A row outside the caller's scope answers exactly like a row that does not exist."""
+    request_id = getattr(request.state, "request_id", None) or "-"
+    logger.warning(
+        "scope violation",
+        extra={"event": "request.scope_denied", "path": request.url.path, "request_id": request_id},
+    )
+    return JSONResponse(
+        {"detail": "Not found.", "request_id": request_id},
+        status_code=404,
+        headers={REQUEST_ID_HEADER: request_id},
+    )
+
+
 def register_middleware(app: FastAPI) -> None:
     """Register middleware so the request context wraps the security headers, then the 500 handler."""
     app.middleware("http")(add_security_headers)
     app.middleware("http")(add_request_context)
+    app.add_exception_handler(ScopeViolation, scope_violation_response)
     app.add_exception_handler(Exception, unhandled_error_response)

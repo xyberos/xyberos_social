@@ -1,11 +1,15 @@
 """Conversation membership, message payloads, and the in-process WebSocket fan-out hub."""
 
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-from app.models import ConversationMember, ConversationMessage, User
+from app.core.scoping import conversation_scope
+from app.models import ConversationEvent, ConversationMember, ConversationMessage, User
 from app.schemas.chat import MessagePayload
+from app.services.audit import record_audit
+from app.services.outbox import enqueue_event
 
 
 class ConversationSocketHub:
@@ -51,6 +55,58 @@ def active_conversation_member(
     if member is None or member.left_at is not None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return member
+
+
+def record_conversation_event(
+    database: Session,
+    conversation_id: UUID,
+    *,
+    event: str,
+    action: str,
+    actor_user_id: UUID | None,
+    subject_user_id: UUID | None = None,
+    details: str = "",
+    before_state: dict[str, Any] | None = None,
+    after_state: dict[str, Any] | None = None,
+) -> None:
+    """Record one conversation membership change.
+
+    `action` keeps the `conversation_events` vocabulary the chat transcript renders;
+    `event` is the shared `domain.action` name used by the platform audit log and the
+    outbox. Membership changes are administrative — one participant acting on another —
+    which is why they are audited, unlike message content, which is outbox-only.
+    """
+    scope = conversation_scope(conversation_id)
+    database.add(
+        ConversationEvent(
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            subject_user_id=subject_user_id,
+            action=action,
+            details=details,
+        )
+    )
+    record_audit(
+        database,
+        action=event,
+        scope=scope,
+        actor_user_id=actor_user_id,
+        target_type="user" if subject_user_id is not None else "conversation",
+        target_id=subject_user_id if subject_user_id is not None else conversation_id,
+        before_state=before_state,
+        after_state=after_state,
+    )
+    enqueue_event(
+        database,
+        event=event,
+        aggregate_type="conversation",
+        aggregate_id=conversation_id,
+        scope=scope,
+        payload={
+            "details": details,
+            "subject_user_id": str(subject_user_id) if subject_user_id is not None else None,
+        },
+    )
 
 
 def direct_conversation_key(first_user_id: UUID, second_user_id: UUID) -> str:
