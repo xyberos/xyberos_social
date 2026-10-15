@@ -15,8 +15,15 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_username: str | None = None
     smtp_password: str | None = None
+    log_json: bool | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def json_logs(self) -> bool:
+        if self.log_json is not None:
+            return self.log_json
+        return self.app_env != "development"
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":

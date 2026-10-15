@@ -32,6 +32,8 @@ a:hover { color: var(--green-dark); }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 3px solid #c56a49; outline-offset: 3px; }
+.skip-link { position: absolute; left: -9999px; top: 0; z-index: 20; padding: 10px 14px; border-radius: 0 0 6px 0; color: white; background: var(--green); font-size: 13px; font-weight: 650; text-decoration: none; }
+.skip-link:focus { left: 0; color: white; }
 
 .topbar {
   position: sticky;
@@ -415,6 +417,8 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .message-compose { position: relative; padding: 10px; display: flex; align-items: flex-end; gap: 10px; border: 1px solid var(--line); border-radius: 5px; background: white; }
 .message-compose textarea { min-width: 0; max-height: 140px; flex: 1; padding: 9px; resize: vertical; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 14px; line-height: 1.45; }
 .message-compose textarea:focus { box-shadow: none; }
+.message-compose textarea:focus-visible { outline: 3px solid #c56a49; outline-offset: 1px; }
+.message-compose:focus-within { border-color: var(--green); }
 .message-compose button { flex: 0 0 auto; }
 .message-error { position: absolute; right: 8px; bottom: calc(100% + 5px); color: var(--error); font-size: 11px; }
 .logout-form { margin-top: 20px; }

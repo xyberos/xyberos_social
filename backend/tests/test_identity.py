@@ -1,6 +1,6 @@
 from urllib.parse import parse_qs, urlparse
 
-import app.main as main
+import app.api.routes.identity as identity_routes
 
 from conftest import csrf_from
 
@@ -86,7 +86,9 @@ def test_login_and_logout(client):
 
 def test_password_reset_is_generic_and_one_time(client, monkeypatch):
     delivered = []
-    monkeypatch.setattr(main, "send_password_reset_email", lambda email, url: delivered.append(url))
+    monkeypatch.setattr(
+        identity_routes, "send_password_reset_email", lambda email, url: delivered.append(url)
+    )
     register(client)
     page = client.get("/forgot-password")
     csrf_token = csrf_from(page.text)

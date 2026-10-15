@@ -14,16 +14,17 @@
     {% if conversation_id is defined %}<script defer src="/static/chat.js"></script>{% endif %}
   </head>
   <body class="{{ 'signed-in' if user is defined and user else '' }}">
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="topbar">
       <a class="wordmark" href="/" aria-label="Soccom home">soccom<span>.</span></a>
       <nav aria-label="Main navigation">
         {% if user is defined and user %}
-          <a href="/conversations"><span class="material-symbols-rounded nav-icon" aria-hidden="true">chat_bubble</span>Chat</a>
-          <a href="/updates"><span class="material-symbols-rounded nav-icon" aria-hidden="true">dynamic_feed</span>Updates</a>
-          <a href="/notifications"><span class="material-symbols-rounded nav-icon" aria-hidden="true">notifications</span>Notifications</a>
-          <a href="/communities"><span class="material-symbols-rounded nav-icon" aria-hidden="true">groups</span>Communities</a>
-          <a href="/people"><span class="material-symbols-rounded nav-icon" aria-hidden="true">person_search</span>People</a>
-          <a class="nav-profile" href="/profile"><span class="material-symbols-rounded nav-icon" aria-hidden="true">account_circle</span>Profile</a>
+          <a href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">chat_bubble</span>Chat</a>
+          <a href="/updates" {% if request.url.path.startswith('/updates') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">dynamic_feed</span>Updates</a>
+          <a href="/notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">notifications</span>Notifications</a>
+          <a href="/communities" {% if request.url.path.startswith('/communities') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">groups</span>Communities</a>
+          <a href="/people" {% if request.url.path.startswith('/people') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">person_search</span>People</a>
+          <a class="nav-profile" href="/profile" {% if request.url.path.startswith('/profile') %}aria-current="page"{% endif %}><span class="material-symbols-rounded nav-icon" aria-hidden="true">account_circle</span>Profile</a>
           <a class="nav-settings" href="/settings" aria-label="Settings"><span class="material-symbols-rounded nav-icon" aria-hidden="true">settings</span><span class="nav-label">Settings</span></a>
         {% else %}
           <a href="/login">Sign in</a>
@@ -31,7 +32,7 @@
         {% endif %}
       </nav>
     </header>
-    <main id="main-content">
+    <main id="main-content" tabindex="-1">
       {% block content %}{% endblock %}
     </main>
     {% if user is defined and user %}

@@ -1,22 +1,29 @@
 from logging.config import fileConfig
+import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.config import get_settings
-from app.database import Base
+from app.core.config import get_settings
+from app.core.database import Base
 from app import models  # noqa: F401
+
+
+def database_url() -> str:
+    """ALEMBIC_DATABASE_URL wins over app settings so a rehearsal can target a scratch database."""
+    return os.environ.get("ALEMBIC_DATABASE_URL") or get_settings().database_url
+
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+config.set_main_option("sqlalchemy.url", database_url().replace("%", "%%"))
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=get_settings().database_url,
+        url=database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
