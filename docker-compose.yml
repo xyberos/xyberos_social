@@ -1,4 +1,31 @@
+# Pinned so the stack keeps one identity when the project directory is renamed. Compose
+# otherwise derives the project name from the directory, which starts a second stack with a
+# fresh empty volume, leaves the running one unmanageable, and collides on published ports.
+name: soccom
+
 services:
+  app:
+    build:
+      context: .
+    environment:
+      # Compose service names resolve inside the Compose network, so the container reaches
+      # PostgreSQL and Mailpit by service name rather than through the host port.
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://soccom:soccom@postgres:5432/soccom
+      APP_BASE_URL: http://localhost:8010
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: accounts@soccom.local
+    ports:
+      # Published on 8010 so the container can run beside the documented local `uvicorn`
+      # workflow on 8000. A real deployment publishes 8000 behind its proxy; change this if
+      # 8010 is taken on the host.
+      - "8010:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:

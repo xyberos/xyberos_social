@@ -196,6 +196,8 @@ Object storage (Phase 8) and an E2EE-capable TURN/media-server path (Phase 9) ar
 
 ### Phase 7: Beta readiness and learning
 
+**Status:** The code side is landed: `/metrics` with request, latency, DB pool, and queue gauges; alert rules and runbooks in `ops/`; a rehearsed backup restore; a bounded load test with measured results; an accessibility test suite; and a container image that serves the application, its probes, and its metrics. Still open, and owned by the operator rather than by the repository: the hosting decision, the invite-only pilot, and the named beta, operations, moderation, and support owners listed at the end of `ops/runbooks.md`.
+
 **Deliverables:** production-like beta deployment, operational runbooks, privacy/security test evidence, and a feedback loop.
 
 **Work:**

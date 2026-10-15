@@ -1,0 +1,120 @@
+# Alerting rules for a beta deployment.
+#
+# These rules read only what the application already exposes: `up`, the counters and
+# latency histogram on `/metrics`, and the saturation gauges for the connection pool and
+# the two queues. Scrape interval is assumed to be 15s.
+#
+# Two of these need a decision before they are useful in an environment:
+#   * SoccomOutboxBacklogIsNotDraining is expected to fire until a publisher ships, because
+#     nothing consumes the outbox yet. Keep it muted until then.
+#   * SoccomRestoreRehearsalIsStale reads a metric that only exists once the scheduled
+#     restore rehearsal pushes its timestamp. Run it on a schedule and push the result, or
+#     delete the rule.
+#
+# Each annotation points at the matching section of ops/runbooks.md.
+
+groups:
+  - name: soccom-availability
+    rules:
+      - alert: SoccomServiceDown
+        expr: up{job="soccom"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The application is not scrapeable"
+          description: "No successful scrape for 2 minutes. Confirm the process is running before assuming network trouble."
+          runbook: "ops/runbooks.md#service-down"
+
+      - alert: SoccomReadinessFailing
+        expr: probe_success{job="soccom-readiness"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Readiness reports unavailable"
+          description: "`GET /readyz` is failing, so the database is unreachable from the application. Drain traffic rather than restarting the process."
+          runbook: "ops/runbooks.md#database-unreachable"
+
+  - name: soccom-errors-and-latency
+    rules:
+      - alert: SoccomServerErrorRateHigh
+        expr: |
+          (
+            sum(rate(soccom_http_requests_total{status="5xx"}[5m]))
+            /
+            clamp_min(sum(rate(soccom_http_requests_total[5m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of requests are failing with 5xx"
+          description: "Search the log stream for `\"event\": \"request.failed\"` and correlate the request ids with the failing responses."
+          runbook: "ops/runbooks.md#elevated-errors-or-latency"
+
+      - alert: SoccomRequestLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (rate(soccom_http_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 1s on {{ $labels.route }}"
+          description: "One slow route. Compare with the database pool gauges before assuming an application problem."
+          runbook: "ops/runbooks.md#elevated-errors-or-latency"
+
+  - name: soccom-saturation
+    rules:
+      - alert: SoccomDatabasePoolSaturated
+        expr: |
+          (
+            soccom_db_pool_connections{state="checked_out"}
+            /
+            clamp_min(
+              soccom_db_pool_connections{state="size"} + soccom_db_pool_connections{state="overflow"},
+              1
+            )
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The connection pool is nearly exhausted"
+          description: "Requests are about to queue for a connection. Look for a slow query or a leaked session before raising the pool size."
+          runbook: "ops/runbooks.md#pool-exhaustion"
+
+      - alert: SoccomIdempotencyKeysStuck
+        expr: soccom_idempotency_keys_in_progress > 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Idempotency keys are reserved by requests that never finished"
+          description: "Retries presenting those keys answer 409 until the reservations are resolved."
+          runbook: "ops/runbooks.md#stuck-idempotency-keys"
+
+      - alert: SoccomOutboxBacklogIsNotDraining
+        expr: soccom_outbox_unpublished_events > 1000
+        for: 24h
+        labels:
+          severity: info
+        annotations:
+          summary: "The outbox backlog has been over 1000 for a day"
+          description: "Expected until a publisher ships; keep muted until then. After that, this means the publisher is stalled or failing."
+          runbook: "ops/runbooks.md#outbox-backlog"
+
+  - name: soccom-release-integrity
+    rules:
+      - alert: SoccomRestoreRehearsalIsStale
+        expr: (time() - soccom_restore_rehearsal_timestamp_seconds) > 35 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful backup restore rehearsal in five weeks"
+          description: "Run the restore rehearsal and record the date. Backups that have never been restored are not backups."
+          runbook: "ops/runbooks.md#restore-from-backup"

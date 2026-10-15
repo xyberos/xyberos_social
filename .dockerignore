@@ -1,0 +1,26 @@
+# Keep the image to the application and its dependencies. Secrets and the local
+# environment never enter the build context, so a stray `COPY` cannot bake them in.
+
+.git/
+.github/
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.sqlite3
+*.sqlite
+*.db
+
+# Local configuration and secrets, with the template kept as documentation.
+.env
+.env.*
+!.env.example
+
+# Repository material that is not part of the running application.
+ops/
+*.md

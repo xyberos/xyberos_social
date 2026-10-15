@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.api.deps import client_key
 from app.core.config import get_settings
+from app.core.metrics import http_request_duration, http_requests, route_label, status_class
 from app.core.observability import REQUEST_ID_HEADER, request_id_var, resolve_request_id
 from app.core.scoping import ScopeViolation
 
@@ -45,7 +46,9 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-_HEALTH_PATHS = {"/healthz", "/readyz"}
+# Probes and scrapes run on a fixed interval, so they log at DEBUG instead of flooding the
+# request log with entries nobody reads.
+_QUIET_PATHS = {"/healthz", "/readyz", "/metrics"}
 
 
 def log_request(request: Request, request_id: str, status_code: int, started: float) -> None:
@@ -53,7 +56,7 @@ def log_request(request: Request, request_id: str, status_code: int, started: fl
     if path.startswith("/static/"):
         return
     logger.log(
-        logging.DEBUG if path in _HEALTH_PATHS else logging.INFO,
+        logging.DEBUG if path in _QUIET_PATHS else logging.INFO,
         "request completed",
         extra={
             "event": "request",
@@ -67,15 +70,28 @@ def log_request(request: Request, request_id: str, status_code: int, started: fl
     )
 
 
+def record_request_metrics(request: Request, status_code: int, elapsed: float) -> None:
+    labels = {"route": route_label(request), "method": request.method}
+    http_requests.inc(status=status_class(status_code), **labels)
+    http_request_duration.observe(elapsed, **labels)
+
+
 async def add_request_context(request: Request, call_next):
     request_id = resolve_request_id(request.headers.get(REQUEST_ID_HEADER))
     request.state.request_id = request_id
     token = request_id_var.set(request_id)
     started = time.perf_counter()
     try:
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # The catch-all error handler is the outermost middleware, so an unhandled
+            # failure never reaches the code below and its 500 is counted here instead.
+            record_request_metrics(request, 500, time.perf_counter() - started)
+            raise
         response.headers[REQUEST_ID_HEADER] = request_id
         log_request(request, request_id, response.status_code, started)
+        record_request_metrics(request, response.status_code, time.perf_counter() - started)
         return response
     finally:
         request_id_var.reset(token)
