@@ -26,6 +26,7 @@ APPLICATION_TABLES = {
     "platform_audit_events",
     "outbox_events",
     "idempotency_keys",
+    "attachments",
 }
 
 

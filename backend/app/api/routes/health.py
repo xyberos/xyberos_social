@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import engine, get_db
 from app.core.metrics import gauge, registry, uptime_seconds
 from app.models import IdempotencyKey, OutboxEvent
+from app.services.attachments import pending_upload_count
 
 router = APIRouter()
 
@@ -109,6 +110,13 @@ def metrics(database: Session = Depends(get_db)):
                         ),
                     )
                 ],
+            )
+        )
+        blocks.append(
+            gauge(
+                "soccom_attachments_unverified",
+                "Attachments issued or uploaded but not yet verified by a scan.",
+                [({}, float(pending_upload_count(database)))],
             )
         )
     except SQLAlchemyError:

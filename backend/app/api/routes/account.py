@@ -37,6 +37,7 @@ from app.models import (
     UserSession,
 )
 from app.core.security import hash_password, new_token, verify_password
+from app.services.attachments import delete_attachments_for_owner
 from app.services.audit import record_audit
 from app.services.communities import delete_unowned_community, record_community_audit
 from app.services.outbox import enqueue_event
@@ -419,6 +420,9 @@ def delete_account(
     database.query(ContentReport).filter(ContentReport.reporter_id == user.id).update(
         {ContentReport.reason: "Reporter account deleted."}, synchronize_session=False
     )
+    # Attachment objects go before their rows. Access is revoked either way, but deleting the
+    # object first means the bytes do not outlive the record that made them reachable.
+    delete_attachments_for_owner(database, owner_user_id=user.id)
     user.email = f"deleted+{user.id.hex}@deleted.invalid"
     user.username = f"deleted_{user.id.hex[:16]}"
     user.display_name = "Deleted account"

@@ -38,9 +38,12 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
-        _DOCS_CSP if request.url.path in _DOCS_PATHS else _APP_CSP
-    )
+    # A route may set its own deliberate policy (attachment delivery serves stored media under
+    # a narrower one); everything else gets the application policy for its route class.
+    if "Content-Security-Policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = (
+            _DOCS_CSP if request.url.path in _DOCS_PATHS else _APP_CSP
+        )
     if get_settings().app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response

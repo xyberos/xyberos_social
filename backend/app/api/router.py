@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     account,
+    attachments,
     chat,
     communities,
     content,
@@ -23,6 +24,7 @@ for route_module in (
     identity,
     people,
     chat,
+    attachments,
     communities,
     content,
     moderation,

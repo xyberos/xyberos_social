@@ -17,6 +17,26 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     log_json: bool | None = None
 
+    # Attachment bytes live in S3-compatible object storage, never in PostgreSQL
+    # (Decision 15). Credentials are optional here so a deployment can use boto3's own
+    # chain (instance role, AWS_ACCESS_KEY_ID, ~/.aws/credentials) instead.
+    s3_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
+    s3_bucket: str = "soccom-attachments"
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_use_path_style: bool = True
+
+    attachment_max_bytes: int = 10 * 1024 * 1024
+    attachment_message_limit: int = 4
+    attachment_account_quota_bytes: int = 200 * 1024 * 1024
+    attachment_upload_ttl_seconds: int = 900
+
+    # Uploads are scanned before they can be downloaded. Leave unset to run the structural
+    # validator only (type, size, and magic-byte checks) outside production.
+    clamav_host: str | None = None
+    clamav_port: int = 3310
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -38,6 +58,13 @@ class Settings(BaseSettings):
                 raise ValueError("APP_BASE_URL must use HTTPS in production")
             if not self.database_url.startswith("postgresql+psycopg://"):
                 raise ValueError("DATABASE_URL must use PostgreSQL in production")
+            if not (self.s3_bucket and self.s3_endpoint_url):
+                raise ValueError("S3_BUCKET and S3_ENDPOINT_URL are required in production")
+            if not self.clamav_host:
+                raise ValueError(
+                    "CLAMAV_HOST is required in production: an upload must be scanned before "
+                    "it can be downloaded"
+                )
         return self
 
 

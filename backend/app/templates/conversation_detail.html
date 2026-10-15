@@ -53,6 +53,13 @@
         <article class="message-row {{ 'message-mine' if item.mine else 'message-theirs' }}" data-message-id="{{ item.message.id }}" data-sender-id="{{ item.sender.id }}">
           {% if conversation.kind == 'group' and not item.mine %}<span class="message-sender">{{ item.sender.display_name }}</span>{% endif %}
           <p class="message-bubble">{{ item.message.body }}</p>
+          {% for attachment in message_attachments.get(item.message.id, []) %}
+            {% if attachment.inline %}
+              <a class="message-attachment" href="{{ attachment.download_url }}" target="_blank" rel="noopener"><img src="{{ attachment.download_url }}" alt="{{ attachment.filename }}" loading="lazy"></a>
+            {% else %}
+              <a class="message-attachment" href="{{ attachment.download_url }}">{{ attachment.filename }} · {{ attachment.size_bytes // 1024 }} KB</a>
+            {% endif %}
+          {% endfor %}
           <time datetime="{{ item.message.created_at.isoformat() }}">{{ item.message.created_at.strftime('%H:%M') }}{% if item.mine and peer_read_at and peer_read_at >= item.message.created_at %} · Read{% endif %}</time>
         </article>
       {% else %}<p class="empty-state message-empty">No messages yet. Say hello.</p>{% endfor %}
@@ -63,6 +70,9 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="visually-hidden" for="message-body">Write a message</label>
         <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message" required></textarea>
+        <label class="visually-hidden" for="message-attachments">Attach files</label>
+        <input id="message-attachments" name="attachments" type="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain">
+        <span id="attachment-progress" class="upload-progress" role="status" aria-live="polite"></span>
         <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Send</button>
         <span id="message-error" class="message-error" role="alert"></span>
       </form>

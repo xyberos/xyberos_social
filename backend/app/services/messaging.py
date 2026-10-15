@@ -6,8 +6,9 @@ from uuid import UUID
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.core.scoping import conversation_scope
-from app.models import ConversationEvent, ConversationMember, ConversationMessage, User
+from app.models import Attachment, ConversationEvent, ConversationMember, ConversationMessage, User
 from app.schemas.chat import MessagePayload
+from app.services.attachments import attachment_payload
 from app.services.audit import record_audit
 from app.services.outbox import enqueue_event
 
@@ -114,7 +115,9 @@ def direct_conversation_key(first_user_id: UUID, second_user_id: UUID) -> str:
     return sha256(":".join(pair).encode("utf-8")).hexdigest()
 
 
-def message_payload(message: ConversationMessage, sender: User) -> dict:
+def message_payload(
+    message: ConversationMessage, sender: User, attachments: list[Attachment] = ()
+) -> dict:
     return MessagePayload(
         id=str(message.id),
         conversation_id=str(message.conversation_id),
@@ -123,4 +126,5 @@ def message_payload(message: ConversationMessage, sender: User) -> dict:
         sender_username=sender.username,
         body=message.body,
         created_at=message.created_at.isoformat(),
+        attachments=[attachment_payload(attachment) for attachment in attachments],
     ).model_dump()

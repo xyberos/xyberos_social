@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel
 
+from app.schemas.attachments import AttachmentPayload
+
 
 class MessagePayload(BaseModel):
     """The message shape returned by the send endpoint and broadcast over the WebSocket."""
@@ -13,3 +15,4 @@ class MessagePayload(BaseModel):
     sender_username: str
     body: str
     created_at: str
+    attachments: list[AttachmentPayload] = []

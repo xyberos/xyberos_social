@@ -544,3 +544,40 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Attachments: images render inline, everything else is an explicit download link. */
+.message-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.message-attachment {
+  align-self: flex-start;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+
+.message-attachment img {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 320px;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.message-compose input[type="file"] {
+  max-width: 12rem;
+  font-size: 0.8rem;
+}
+
+.upload-progress {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.upload-progress:empty {
+  display: none;
+}

@@ -14,6 +14,7 @@ from app.core import events
 from app.core.database import get_db
 from app.core.scoping import conversation_scope
 from app.models import (
+    Attachment,
     Conversation,
     ConversationEvent,
     ConversationMember,
@@ -22,6 +23,7 @@ from app.models import (
 )
 from app.core.security import check_rate_limit
 from app.services import idempotency
+from app.services.attachments import attach_to_message, attachment_payload
 from app.services.authorization import is_blocked_between
 from app.services.messaging import (
     active_conversation_member,
@@ -322,6 +324,20 @@ def conversation_detail(
         }
         for message in message_rows
     ]
+    message_attachments: dict[UUID, list] = {}
+    if message_rows:
+        attachment_rows = database.scalars(
+            select(Attachment)
+            .where(
+                Attachment.message_id.in_([message.id for message in message_rows]),
+                Attachment.scan_state == "scanned",
+            )
+            .order_by(Attachment.created_at)
+        ).all()
+        for attachment in attachment_rows:
+            message_attachments.setdefault(attachment.message_id, []).append(
+                attachment_payload(attachment)
+            )
     peer_read_at = None
     if conversation.kind == "direct" and peer:
         peer_read_at = peer["membership"].last_read_at
@@ -345,6 +361,7 @@ def conversation_detail(
             "peer": peer,
             "blocked": blocked,
             "messages": messages,
+            "message_attachments": message_attachments,
             "has_older": has_older,
             "older_cursor": message_rows[0].id if has_older and message_rows else None,
             "peer_read_at": peer_read_at,
@@ -531,6 +548,7 @@ async def send_conversation_message(
     body: str = Form(),
     csrf_token: str = Form(),
     idempotency_key: str | None = Form(default=None),
+    attachment_ids: list[UUID] = Form(default=[]),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
@@ -565,7 +583,9 @@ async def send_conversation_message(
             scope=idempotency.actor_scope(user.id),
             key=key,
             endpoint="send_conversation_message",
-            fingerprint=idempotency.request_fingerprint(conversation.id, body),
+            fingerprint=idempotency.request_fingerprint(
+                conversation.id, body, sorted(str(item) for item in attachment_ids)
+            ),
         )
         if reservation.replay is not None:
             return idempotency.replay_response(reservation.replay)
@@ -577,14 +597,25 @@ async def send_conversation_message(
     database.add(message)
     membership.last_read_at = datetime.now(UTC)
     database.flush()
-    payload = message_payload(message, user)
+    attachments = attach_to_message(
+        database,
+        message_id=message.id,
+        conversation_id=conversation.id,
+        user=user,
+        attachment_ids=attachment_ids,
+    )
+    payload = message_payload(message, user, attachments)
     enqueue_event(
         database,
         event=events.MESSAGE_CREATED,
         aggregate_type="conversation_message",
         aggregate_id=message.id,
         scope=conversation_scope(conversation.id),
-        payload={"conversation_id": str(conversation.id), "sender_id": str(user.id)},
+        payload={
+            "conversation_id": str(conversation.id),
+            "sender_id": str(user.id),
+            "attachments": len(attachments),
+        },
     )
     if reservation is not None:
         if request.headers.get("X-Chat-Request") == "true":

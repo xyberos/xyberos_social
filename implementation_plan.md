@@ -226,7 +226,7 @@ These are small, additive changes to the shipped social core that keep Phases 10
 
 ### Phase 8: Media and file attachments
 
-**Status:** Not started. Extends the Phase 4 conversation surface.
+**Status:** Landed in migration `0011_attachments` and `backend/tests/test_attachments.py`, which covers the exit criteria below. Deferred within this phase, as listed at the end of this section: post and comment media, voice messages, transcoding and adaptive streaming, image derivatives, resumable uploads, and media in exports or email.
 
 **Deliverables:** an object-storage-backed attachment pipeline, attachments in direct and small-group conversations, and reuse of the same pipeline for post and comment media once chat proves it.
 

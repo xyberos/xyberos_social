@@ -80,6 +80,24 @@ Steps 3-4 run the application on the host interpreter. To run the same applicati
 docker compose up -d --build app     # builds the Dockerfile and serves http://localhost:8010
 ```
 
+Attachment bytes need object storage. Start it and create the bucket once:
+
+```powershell
+docker compose up -d object-storage
+$env:PYTHONPATH = "backend"
+.\.venv\Scripts\python.exe -c "from app.core.storage import get_storage; get_storage().ensure_bucket()"
+```
+
+That service is moto, an S3 API implementation intended for development and CI. It keeps state
+in memory, so attachments do not survive a restart of it, and it does not enforce the upload
+policy's size condition — the application re-checks the size on finalize regardless. Point
+`S3_ENDPOINT_URL` at a real bucket for anything beyond local work. To exercise malware scanning
+as well, start the optional scanner and set `CLAMAV_HOST=localhost`:
+
+```powershell
+docker compose --profile scanning up -d    # first start downloads virus signatures, so it is slow
+```
+
 The container publishes 8010 because 8000 belongs to the local `uvicorn` workflow, and the Compose project is pinned as `soccom` in `docker-compose.yml` so renaming the working directory cannot fork the stack into a second, empty volume. It runs as an unprivileged user and carries a health check against `/healthz`.
 
 The Compose credentials are for local development only. Production settings require PostgreSQL, HTTPS, Secure cookies, and SMTP with STARTTLS. The built-in IP rate limiter is process-local; enforce rate limits at the edge as well, especially when running multiple workers. HTMX is pinned to a CDN release in the base template; self-host that asset before public launch.
@@ -127,3 +145,40 @@ The integration hooks that keep the commercial phases from reworking the social 
 - **Scope predicates.** `core/scoping.py` gives every scope-carrying table one `(scope_type, scope_id)` predicate, `scoped_select`/`scoped_get` for reads, and `ScopeViolation` for a mismatch, which `api/middleware.py` answers with the same non-revealing 404 as a missing row. `business` is reserved for Phase 11, and `platform` covers records that must outlive a tenant.
 
 Ids in audit and outbox payloads are strings, and a payload carries only what a consumer needs to act on: the report reason, for example, stays in `content_reports`, where account deletion can redact it.
+
+## Attachments
+
+Attachments extend conversations (Phase 8). Media on posts and comments is not part of this
+phase, and voice messages, transcoding, image derivatives, resumable uploads, and media in
+exports or email are deferred within it.
+
+The flow has three steps, and each enforces its own rule:
+
+1. `POST /conversations/{id}/attachments` checks that the caller is an active participant, then
+   applies the declared type against the allowlist, the per-file ceiling, and the per-account
+   quota, and returns a short-lived single-key upload target. The key is derived from the scope
+   and the attachment id, so a client cannot choose where its bytes land. Presenting the same
+   `Idempotency-Key` returns the same target instead of creating a second one.
+2. The browser posts the bytes straight to object storage. The presigned POST policy asks the
+   storage service to enforce the size ceiling; because not every S3-compatible service honours
+   that condition, `POST /attachments/{id}/finalize` re-checks the stored size anyway. Finalize
+   then detects the type from the bytes and rejects a mismatch with the declaration, strips
+   image metadata by re-encoding the pixels, runs the scan, and only then promotes the object to
+   `scanned`. A replayed finalize is a no-op rather than a second record.
+3. `GET /attachments/{id}/download` re-authorizes every read against the conversation, the
+   attachment's scope, and the block rules. An unknown id, an unfinished upload, a rejected
+   upload, and an unauthorized reader all answer the same non-revealing 404. Allowlisted images
+   may render inline under `default-src 'none'; sandbox`; everything else is sent as a
+   `Content-Disposition: attachment` download. No bucket is public and no URL is permanent.
+
+Each transition is durable, so a scanner outage leaves an upload in `pending_scan` and tells the
+client to retry instead of promoting unverified bytes. Abandoned uploads are reaped when the
+next target is issued, and deleting an account removes its objects before its rows. Markup and
+SVG are refused outright rather than scanned, because no scan verdict makes them safe to serve
+from the application's origin.
+
+Two deliberate boundaries: attachments are **not** end-to-end encrypted, because scanning and
+moderation need readable bytes (Decision 15) — they are encrypted at rest by the storage
+provider and access-controlled here; and a message carries text plus at most
+`ATTACHMENT_MESSAGE_LIMIT` attachments, because the message-body constraint predates media and
+an attachment-only message would need a schema change.

@@ -16,6 +16,21 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       SMTP_FROM: accounts@soccom.local
+      # Compose service names resolve inside the Compose network. Attachment bytes go to the
+      # S3-compatible service below, never into PostgreSQL.
+      S3_ENDPOINT_URL: http://object-storage:5000
+      S3_BUCKET: soccom-attachments
+      S3_REGION: us-east-1
+      S3_USE_PATH_STYLE: "true"
+      # Local development credentials: the Compose object-storage service accepts any values
+      # but still requires a signed request. A deployment leaves these out and authenticates
+      # through boto3's own chain instead.
+      S3_ACCESS_KEY_ID: soccom-local
+      S3_SECRET_ACCESS_KEY: soccom-local-dev
+      # Set these when the optional scanning profile is running, otherwise uploads are
+      # validated structurally and no malware scan is attempted:
+      #   docker compose --profile scanning up -d
+      # CLAMAV_HOST: clamav
     ports:
       # Published on 8010 so the container can run beside the documented local `uvicorn`
       # workflow on 8000. A real deployment publishes 8000 behind its proxy; change this if
@@ -24,6 +39,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      object-storage:
+        condition: service_started
     restart: unless-stopped
 
   postgres:
@@ -47,6 +64,24 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+
+  # Local stand-in for S3-compatible object storage: attachment bytes live here in
+  # development and CI, and a deployment points S3_ENDPOINT_URL at its real bucket instead.
+  # State is in memory, so attachments do not survive a restart of this service.
+  object-storage:
+    image: motoserver/moto:5.2.4
+    ports:
+      - "9000:5000"
+
+  # Opt-in malware scanning. Start it with:
+  #   docker compose --profile scanning up -d
+  # and set CLAMAV_HOST=clamav on the app service. Signature updates make the first start
+  # slow, which is why it is not part of the default stack.
+  clamav:
+    image: clamav/clamav:1.5.4-debian
+    profiles: ["scanning"]
+    ports:
+      - "3310:3310"
 
 volumes:
   postgres-data:
