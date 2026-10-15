@@ -11,7 +11,7 @@ from app.core.observability import configure_logging
 
 configure_logging(get_settings().json_logs)
 
-app = FastAPI(title="Soccom", version="0.1.0")
+app = FastAPI(title="Xyberos Social", version="0.1.0")
 register_middleware(app)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(api_router)
