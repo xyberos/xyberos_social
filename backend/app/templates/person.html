@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ person.display_name }} | Soccom{% endblock %}
+{% block content %}
+<section class="directory-layout">
+  <a class="back-link" href="/people">← People</a>
+  <header class="directory-heading">
+    <p class="eyebrow">Person</p>
+    <h1>{{ person.display_name }}</h1>
+    <p>@{{ person.username }}{% if person.bio %} · {{ person.bio }}{% endif %}</p>
+  </header>
+  {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
+  <div class="person-actions">
+    {% if blocked %}
+      <form method="post" action="/people/{{ person.id }}/unblock">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/people/{{ person.id }}">
+        <button class="button button-quiet" type="submit">Unblock</button>
+      </form>
+    {% elif blocked_you %}
+      <span class="muted-status">They blocked you</span>
+    {% else %}
+      <form method="post" action="/people/{{ person.id }}/{{ 'unfollow' if following else 'follow' }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/people/{{ person.id }}">
+        <button class="button {{ 'button-quiet' if following else 'button-primary' }}" type="submit">{{ 'Following' if following else 'Follow' }}</button>
+      </form>
+      <form method="post" action="/people/{{ person.id }}/block">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/people/{{ person.id }}">
+        <button class="text-button danger-button" type="submit">Block</button>
+      </form>
+      <form method="post" action="/conversations/direct/{{ person.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-quiet" type="submit">Message</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <section class="posts-section" aria-labelledby="person-updates-title">
+    <div class="section-heading"><div><p class="eyebrow">Their own page</p><h2 id="person-updates-title">Updates</h2></div></div>
+    {% if can_view_updates %}
+      <div class="post-list">
+        {% for post in posts %}
+          <article class="post-row">
+            <h3><a href="/posts/{{ post.id }}">{{ post.title or post.body[:80] }}</a></h3>
+            <p class="post-meta">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+            {% if post.title and post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
+          </article>
+        {% else %}
+          <p class="updates-empty">Nothing published yet.</p>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="posts-hint">Personal updates are shared with followers. Follow {{ person.display_name }} to read them.</p>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

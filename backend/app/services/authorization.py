@@ -70,6 +70,52 @@ def find_post(database: Session, community: Community, post_id: UUID) -> Post:
     return post
 
 
+def is_following(database: Session, follower_id, author_id) -> bool:
+    return (
+        database.scalar(
+            select(UserRelationship.source_user_id).where(
+                UserRelationship.source_user_id == follower_id,
+                UserRelationship.target_user_id == author_id,
+                UserRelationship.kind == "follow",
+            )
+        )
+        is not None
+    )
+
+
+def can_view_personal_posts(database: Session, viewer: User | None, author_id: UUID) -> bool:
+    """The per-row rule below, asked once for a whole profile page."""
+    if viewer is None:
+        return False
+    if viewer.id == author_id:
+        return True
+    if is_blocked_between(database, viewer.id, author_id):
+        return False
+    return is_following(database, viewer.id, author_id)
+
+
+def find_personal_post(database: Session, post_id: UUID, user: User | None) -> Post:
+    """A personal update is readable by its author and by their followers, nobody else.
+
+    Outsiders get the same 404 a missing post returns, so the page never confirms that a
+    private update exists.
+    """
+    post = database.get(Post, post_id)
+    if post is None or post.community_id is not None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if user is None or (
+        user.id != post.author_id and not is_following(database, user.id, post.author_id)
+    ):
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if user.id != post.author_id and is_blocked_between(database, user.id, post.author_id):
+        raise HTTPException(status_code=404, detail="Post not found.")
+    # A removed update stays readable to its author, who is the only one who can restore or
+    # clear it, and disappears for everyone else.
+    if post.removed_at is not None and user.id != post.author_id:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    return post
+
+
 def require_community_manager(
     database: Session, community: Community, user: User, owner_only: bool = False
 ) -> str:

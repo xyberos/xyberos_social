@@ -39,8 +39,8 @@ backend/app/
 │                           # communities, content, moderation, notifications
 ├── models/                 # SQLAlchemy models per domain, re-exported from package root
 ├── schemas/                # Pydantic contracts for the JSON endpoints
-├── services/               # authorization, communities, messaging, notifications, updates,
-│                           # audit, outbox, idempotency
+├── services/               # authorization, communities, content helpers, messaging,
+│                           # notifications, updates, audit, outbox, idempotency
 ├── templates/              # Jinja2 templates
 └── static/                 # stylesheet and the chat client
 ```
@@ -195,3 +195,36 @@ moderation need readable bytes (Decision 15) — they are encrypted at rest by t
 provider and access-controlled here; and a message carries text plus at most
 `ATTACHMENT_MESSAGE_LIMIT` attachments, because the message-body constraint predates media and
 an attachment-only message would need a schema change.
+
+## Personal updates
+
+A post belongs to a community or to an account. The second shape arrived in migration
+`0012_personal_posts` and is covered by `backend/tests/test_personal_posts.py`: the schema
+states both shapes in `ck_post_shape`, so a community post is titled and a personal update is
+text with an optional title.
+
+Publishing happens on `/profile` ("Your updates"), which also lists what the author has
+published. A personal update then appears in three places:
+
+- `/posts/{id}` — the thread, with the same comment tree the community thread uses
+  (`templates/partials/comment_tree.html` renders both).
+- `/people/{id}` — the author's page in the directory, where followers read the list.
+- `/updates` — the `people` source, which is exactly the list of accounts the reader follows;
+  the `communities` source therefore never includes a personal update.
+
+The audience is the author and their followers, and every refusal is the same non-revealing
+404 a missing post returns (`find_personal_post`). Removing an update leaves the author a
+tombstone and hides it from everyone else.
+
+Three boundaries are deliberate:
+
+- **No reporting or moderation.** `content_reports` is community-scoped and a moderator role
+  belongs to a community, so a page the author owns has no queue to report into. A personal
+  update is readable only by people who chose to follow its author. A platform-level report
+  path is a product decision that is not made yet, not an oversight to patch locally.
+- **No lock.** Locking exists for moderators, and there is none on a personal page; the author
+  removes an update instead. The author can also remove a comment they did not write, because
+  the thread is theirs.
+- **Account scope, not community scope.** Audit and outbox rows for a personal update carry
+  `account:<author>` rather than a community, which is what keeps them out of a community's
+  trail when the author has no community at all.

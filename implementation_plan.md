@@ -131,7 +131,7 @@ Object storage (Phase 8) and an E2EE-capable TURN/media-server path (Phase 9) ar
 
 ### Phase 3: Posts, comments, and moderation
 
-**Status:** Implemented in the current application.
+**Status:** Implemented in the current application. Extended past this phase's community scope: a post may belong to an account instead of a community, published from `/profile` and readable by the author's followers (migration `0012_personal_posts`, `backend/tests/test_personal_posts.py`). Reporting and moderation stay community-scoped, so a personal update has no report path — see the personal updates section of the README.
 
 **Deliverables:** text posts, threaded comments, reporting, moderator actions, and audit history.
 

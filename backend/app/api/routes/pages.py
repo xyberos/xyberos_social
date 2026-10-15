@@ -59,8 +59,15 @@ def updates_page(
         CommunityMembership.user_id == user.id
     )
     source_conditions = []
+    visibility_conditions = [
+        Community.visibility == "public",
+        Community.id.in_(joined_communities),
+    ]
     if source in {"all", "people"}:
         source_conditions.append(Post.author_id.in_(followed_authors))
+        # A personal update has no community to gate on: the author's followers are its
+        # audience, and this source is exactly the list of people the reader follows.
+        visibility_conditions.append(Post.community_id.is_(None))
     if source in {"all", "communities"}:
         source_conditions.append(Post.community_id.in_(joined_communities))
 
@@ -83,7 +90,7 @@ def updates_page(
         Post.created_at <= window_end,
         User.is_active.is_(True),
         Post.author_id.not_in(blocked_authors),
-        or_(Community.visibility == "public", Community.id.in_(joined_communities)),
+        or_(*visibility_conditions),
         or_(*source_conditions),
     ]
     if cursor_created_at is not None and cursor_post_id is not None:
@@ -103,7 +110,8 @@ def updates_page(
     rows = database.execute(
         select(Post, User, Community)
         .join(User, User.id == Post.author_id)
-        .join(Community, Community.id == Post.community_id)
+        # A personal update has no community row; the template branches on that.
+        .outerjoin(Community, Community.id == Post.community_id)
         .where(*conditions)
         .order_by(Post.created_at.desc(), Post.id.desc())
         .limit(limit + 1)

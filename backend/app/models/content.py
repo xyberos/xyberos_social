@@ -1,4 +1,4 @@
-"""Community posts, threaded comments, reports, and moderation history."""
+"""Community discussions and personal updates, threaded comments, reports, and moderation."""
 
 from datetime import datetime
 
@@ -23,22 +23,34 @@ from app.core.database import Base
 
 
 class Post(Base):
+    """A post belongs to a community, or to an account when it is a personal update.
+
+    The two shapes are mutually exclusive and the database enforces which fields each one
+    carries: a community post is titled, a personal update is text with an optional title.
+    """
+
     __tablename__ = "posts"
     __table_args__ = (
-        CheckConstraint("length(title) BETWEEN 1 AND 140", name="ck_post_title_length"),
+        CheckConstraint(
+            "(community_id IS NOT NULL AND title IS NOT NULL"
+            " AND length(title) BETWEEN 1 AND 140)"
+            " OR (community_id IS NULL AND length(body) BETWEEN 1 AND 10000)",
+            name="ck_post_shape",
+        ),
+        CheckConstraint("title IS NULL OR length(title) <= 140", name="ck_post_title_length"),
         CheckConstraint("length(body) <= 10000", name="ck_post_body_length"),
         Index("ix_posts_community_created", "community_id", "created_at"),
         Index("ix_posts_author_created", "author_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    community_id: Mapped[UUID] = mapped_column(
-        ForeignKey("communities.id", ondelete="CASCADE"), nullable=False
+    community_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("communities.id", ondelete="CASCADE"), nullable=True
     )
     author_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    title: Mapped[str] = mapped_column(String(140))
+    title: Mapped[str | None] = mapped_column(String(140))
     body: Mapped[str] = mapped_column(Text, default="", nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

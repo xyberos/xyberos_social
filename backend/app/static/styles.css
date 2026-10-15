@@ -606,3 +606,7 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .post-row h3 { margin: 0 0 4px; font-size: 16px; }
 .post-meta { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
 .post-excerpt { margin: 0; font-size: 13px; line-height: 1.5; }
+
+/* A person's name in the directory is a link to their page. */
+.person-link { color: var(--ink); font-weight: 650; text-decoration: none; }
+.person-link:hover { color: var(--green-dark); }

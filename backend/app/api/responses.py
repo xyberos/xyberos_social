@@ -34,8 +34,18 @@ def invalid_form(request: Request, page: str, browser_session: UserSession, erro
     )
 
 
-def redirect_people(message: str | None = None) -> RedirectResponse:
-    location = "/people"
+def redirect_people(
+    message: str | None = None, next_url: str | None = None
+) -> RedirectResponse:
+    location = relative_target(next_url) or "/people"
     if message:
-        location = f"{location}?message={quote(message)}"
+        separator = "&" if "?" in location else "?"
+        location = f"{location}?{separator}message={quote(message)}"
     return RedirectResponse(location, status_code=303)
+
+
+def relative_target(value: str | None) -> str | None:
+    """Accept only a site-relative path, so a caller's `next` cannot leave the application."""
+    if value and value.startswith("/") and not value.startswith("//"):
+        return value
+    return None

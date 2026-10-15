@@ -13,7 +13,7 @@
       <article class="directory-row">
         <div class="person-avatar" aria-hidden="true">{{ person.user.display_name[:1]|upper }}</div>
         <div class="person-info">
-          <strong>{{ person.user.display_name }}</strong>
+          <strong><a class="person-link" href="/people/{{ person.user.id }}">{{ person.user.display_name }}</a></strong>
           <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %}</span>
         </div>
         <div class="person-actions">

@@ -55,10 +55,25 @@ def profile_page(
     if user is None:
         return RedirectResponse("/login", status_code=303)
     browser_session = current_session(request, database)
+    posts = database.scalars(
+        select(Post)
+        .where(
+            Post.author_id == user.id,
+            Post.community_id.is_(None),
+            Post.removed_at.is_(None),
+        )
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .limit(20)
+    ).all()
     return render(
         request,
         "profile.html",
-        form_context(browser_session, user=user),
+        form_context(
+            browser_session,
+            user=user,
+            posts=posts,
+            post_error=request.query_params.get("error"),
+        ),
     )
 
 
@@ -156,13 +171,14 @@ def export_account(request: Request, database: Session = Depends(get_db)):
     ).all()
     authored_posts = database.execute(
         select(Post, Community)
-        .join(Community, Community.id == Post.community_id)
+        # A personal update has no community row, and it is still the author's data.
+        .outerjoin(Community, Community.id == Post.community_id)
         .where(Post.author_id == user.id)
     ).all()
     authored_comments = database.execute(
         select(Comment, Post, Community)
         .join(Post, Post.id == Comment.post_id)
-        .join(Community, Community.id == Post.community_id)
+        .outerjoin(Community, Community.id == Post.community_id)
         .where(Comment.author_id == user.id)
     ).all()
     relationships = database.scalars(
@@ -244,7 +260,7 @@ def export_account(request: Request, database: Session = Depends(get_db)):
         "posts": [
             {
                 "id": post.id,
-                "community": community.slug,
+                "community": community.slug if community else None,
                 "title": post.title,
                 "body": post.body,
                 "created_at": post.created_at,
@@ -256,7 +272,7 @@ def export_account(request: Request, database: Session = Depends(get_db)):
             {
                 "id": comment.id,
                 "post_id": post.id,
-                "community": community.slug,
+                "community": community.slug if community else None,
                 "parent_id": comment.parent_id,
                 "body": comment.body,
                 "created_at": comment.created_at,

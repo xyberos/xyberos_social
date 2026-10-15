@@ -1,0 +1,41 @@
+{# Renders one comment and its replies, for both the community thread and the personal
+   thread. The callers differ only in the URLs they build and in who may moderate:
+   `comments_base` is the collection endpoint (replies post to it, removal appends
+   `/{id}/remove`), and an empty `report_url_prefix` hides reporting entirely. #}
+{% macro show_comment(node, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported) %}
+  {% set comment = node.comment %}
+  <article class="comment" id="comment-{{ comment.id }}">
+    <div class="comment-meta"><strong>{{ node.author.display_name }}</strong><span>@{{ node.author.username }}</span><time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%b %d, %Y · %H:%M') }}</time></div>
+    {% if comment.removed_at %}<p class="removed-copy">This comment was removed.</p>{% else %}<p class="comment-body">{{ comment.body }}</p>{% endif %}
+    {% if can_reply and not comment.removed_at %}
+      <details class="reply-details"><summary>Reply</summary>
+        <form method="post" action="{{ comments_base }}" class="reply-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="parent_id" value="{{ comment.id }}">
+          <label class="visually-hidden" for="reply-{{ comment.id }}">Reply to {{ node.author.username }}</label>
+          <textarea id="reply-{{ comment.id }}" name="body" rows="2" maxlength="5000" required></textarea>
+          <button class="button button-quiet" type="submit">Send reply</button>
+        </form>
+      </details>
+    {% endif %}
+    <div class="comment-tools">
+      {% if report_url_prefix and user and not comment.removed_at and user.id != comment.author_id and ('comment', comment.id) not in reported %}
+        <details class="report-details"><summary>Report</summary>
+          <form method="post" action="{{ report_url_prefix }}/{{ comment.id }}" class="report-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="visually-hidden" for="comment-report-{{ comment.id }}">Why are you reporting this comment?</label>
+            <input id="comment-report-{{ comment.id }}" name="reason" maxlength="1000" placeholder="Reason for report" required>
+            <button class="text-button danger-button" type="submit">Send report</button>
+          </form>
+        </details>
+      {% elif report_url_prefix and user and ('comment', comment.id) in reported %}<span class="muted-status">Reported</span>{% endif %}
+      {% if user and not comment.removed_at and (user.id == comment.author_id or can_remove_any_comment) %}
+        <form method="post" action="{{ comments_base }}/{{ comment.id }}/remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="text-button danger-button" type="submit">Remove</button>
+        </form>
+      {% endif %}
+    </div>
+    {% if node.children %}<div class="comment-children">{% for child in node.children %}{{ show_comment(child, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported) }}{% endfor %}</div>{% endif %}
+  </article>
+{% endmacro %}
