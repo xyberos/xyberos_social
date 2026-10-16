@@ -5,7 +5,7 @@ import time
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from app.api.deps import client_key
 from app.core.config import get_settings
@@ -84,6 +84,38 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+# A redirect on an HTMX request becomes an HX-Redirect, so the browser navigates instead of
+# swapping a fragment of the answer into the page the previous session rendered.
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+
+
+def htmx_navigation(request: Request, response: Response) -> Response:
+    """Turn a redirect on an HTMX request into the full page load HTMX cannot perform itself.
+
+    A boosted link or form follows its redirect with a second request and swaps only the piece
+    it was told to (`#main-content`), which leaves the shell around it showing the previous
+    session: a signed-in top bar and rail wrapped around the sign-in page. That is exactly the
+    case where the server said "not here" (most often an expired session), so the browser has
+    to navigate and the answer is an `HX-Redirect` header instead of a redirect status.
+    """
+    if request.headers.get("HX-Request") != "true":
+        return response
+    if response.status_code not in _REDIRECT_STATUSES:
+        return response
+    location = response.headers.get("location")
+    if not location:
+        return response
+    # Headers other than the target still belong to the client, so only the ones this body
+    # would have carried are dropped.
+    headers = {
+        name: value
+        for name, value in response.headers.items()
+        if name.lower() not in {"location", "content-length", "content-type"}
+    }
+    headers["HX-Redirect"] = location
+    return Response(status_code=200, headers=headers)
+
+
 # Probes and scrapes run on a fixed interval, so they log at DEBUG instead of flooding the
 # request log with entries nobody reads.
 _QUIET_PATHS = {"/healthz", "/readyz", "/metrics"}
@@ -127,6 +159,7 @@ async def add_request_context(request: Request, call_next):
             # failure never reaches the code below and its 500 is counted here instead.
             record_request_metrics(request, 500, time.perf_counter() - started)
             raise
+        response = htmx_navigation(request, response)
         response.headers[REQUEST_ID_HEADER] = request_id
         log_request(request, request_id, response.status_code, started)
         record_request_metrics(request, response.status_code, time.perf_counter() - started)

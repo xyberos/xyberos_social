@@ -45,9 +45,9 @@ def register_page(
     database: Session = Depends(get_db),
 ):
     if authenticated_user(request, database):
-        return RedirectResponse("/conversations", status_code=303)
+        return RedirectResponse("/dashboard", status_code=303)
     browser_session = ensure_browser_session(request, database)
-    return render(request, "register.html", form_context(browser_session))
+    return render(request, "auth/register.html", form_context(browser_session))
 
 
 @router.post("/register", response_class=HTMLResponse)
@@ -67,7 +67,7 @@ def register(
     require_csrf(request, browser_session, csrf_token)
     if not allow_request(request, "register"):
         return invalid_form(
-            request, "register.html", browser_session, "Too many attempts. Try again later."
+            request, "auth/register.html", browser_session, "Too many attempts. Try again later."
         )
 
     email = email.strip().lower()
@@ -75,29 +75,29 @@ def register(
     display_name = display_name.strip()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) or len(email) > 320:
         return invalid_form(
-            request, "register.html", browser_session, "Enter a valid email address."
+            request, "auth/register.html", browser_session, "Enter a valid email address."
         )
     if not USERNAME_PATTERN.fullmatch(username):
         return invalid_form(
             request,
-            "register.html",
+            "auth/register.html",
             browser_session,
             "Username must be 3–24 characters using letters, numbers, or underscores.",
         )
     if not display_name or len(display_name) > 80:
         return invalid_form(
-            request, "register.html", browser_session, "Display name must be 1–80 characters."
+            request, "auth/register.html", browser_session, "Display name must be 1–80 characters."
         )
     if len(password) < 8 or len(password.encode("utf-8")) > 128:
         return invalid_form(
-            request, "register.html", browser_session, "Use a password between 8 and 128 bytes."
+            request, "auth/register.html", browser_session, "Use a password between 8 and 128 bytes."
         )
     if password != password_confirmation:
-        return invalid_form(request, "register.html", browser_session, "Passwords do not match.")
+        return invalid_form(request, "auth/register.html", browser_session, "Passwords do not match.")
     if database.scalar(select(User.id).where((User.email == email) | (User.username == username))):
         return invalid_form(
             request,
-            "register.html",
+            "auth/register.html",
             browser_session,
             "That email or username is already in use.",
         )
@@ -115,7 +115,7 @@ def register(
         database.rollback()
         logger.exception("Account registration failed")
         return invalid_form(
-            request, "register.html", browser_session, "Could not create the account. Try again."
+            request, "auth/register.html", browser_session, "Could not create the account. Try again."
         )
     return begin_authenticated_session(database, user, request)
 
@@ -126,9 +126,9 @@ def login_page(
     database: Session = Depends(get_db),
 ):
     if authenticated_user(request, database):
-        return RedirectResponse("/profile", status_code=303)
+        return RedirectResponse("/dashboard", status_code=303)
     browser_session = ensure_browser_session(request, database)
-    return render(request, "login.html", form_context(browser_session))
+    return render(request, "auth/login.html", form_context(browser_session))
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -145,14 +145,14 @@ def login(
     require_csrf(request, browser_session, csrf_token)
     if not allow_request(request, "login"):
         return invalid_form(
-            request, "login.html", browser_session, "Too many attempts. Try again later."
+            request, "auth/login.html", browser_session, "Too many attempts. Try again later."
         )
     user = database.scalar(select(User).where(User.email == email.strip().lower()))
     password_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
     password_matches = verify_password(password, password_hash)
     if user is None or not user.is_active or not password_matches:
         return invalid_form(
-            request, "login.html", browser_session, "Email or password is incorrect."
+            request, "auth/login.html", browser_session, "Email or password is incorrect."
         )
     return begin_authenticated_session(database, user, request)
 
@@ -180,7 +180,7 @@ def forgot_password_page(
     database: Session = Depends(get_db),
 ):
     browser_session = ensure_browser_session(request, database)
-    return render(request, "forgot_password.html", form_context(browser_session))
+    return render(request, "auth/forgot_password.html", form_context(browser_session))
 
 
 @router.post("/forgot-password", response_class=HTMLResponse)
@@ -198,7 +198,7 @@ def forgot_password(
     if not allow_request(request, "forgot-password"):
         return render(
             request,
-            "forgot_password.html",
+            "auth/forgot_password.html",
             form_context(browser_session, error="Too many attempts. Try again later."),
             status_code=429,
         )
@@ -221,7 +221,7 @@ def forgot_password(
         background_tasks.add_task(send_password_reset_email, user.email, reset_url)
     return render(
         request,
-        "forgot_password.html",
+        "auth/forgot_password.html",
         form_context(browser_session, sent=True),
     )
 
@@ -242,13 +242,13 @@ def reset_password_page(
     if reset_record is None or _is_expired(reset_record.expires_at):
         return render(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             form_context(
                 browser_session, token=token, error="This reset link is invalid or expired."
             ),
             status_code=400,
         )
-    return render(request, "reset_password.html", form_context(browser_session, token=token))
+    return render(request, "auth/reset_password.html", form_context(browser_session, token=token))
 
 
 def _is_expired(expiry: datetime) -> bool:
@@ -281,7 +281,7 @@ def reset_password(
     if reset_record is None or _is_expired(reset_record.expires_at):
         return render(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             form_context(
                 browser_session, token=token, error="This reset link is invalid or expired."
             ),
@@ -290,7 +290,7 @@ def reset_password(
     if len(password) < 12 or len(password.encode("utf-8")) > 128:
         return render(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             form_context(
                 browser_session, token=token, error="Use a password between 12 and 128 bytes."
             ),
@@ -299,7 +299,7 @@ def reset_password(
     if password != password_confirmation:
         return render(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             form_context(browser_session, token=token, error="Passwords do not match."),
             status_code=422,
         )
@@ -307,7 +307,7 @@ def reset_password(
     if user is None or not user.is_active:
         return render(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             form_context(
                 browser_session, token=token, error="This reset link is invalid or expired."
             ),

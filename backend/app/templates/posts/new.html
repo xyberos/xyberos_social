@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "partials/page_heading.html" import page_heading %}
+{% from "partials/post_compose.html" import post_compose, post_compose_errors %}
+{% block title %}New post | X-Social{% endblock %}
+{% block content %}
+<section class="compose-layout">
+  {{ page_heading('Publish an update', 'New post', 'A personal update reaches the readers you choose, and reads back on your dashboard.') }}
+
+  {{ post_compose_errors(error) }}
+  {% call post_compose(csrf_token, '/posts/new', 'post-new', rows=6) %}
+    <div class="profile-actions">
+      <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Publish</button>
+      <a class="button button-quiet" href="/dashboard">Cancel</a>
+    </div>
+  {% endcall %}
+</section>
+{% endblock %}

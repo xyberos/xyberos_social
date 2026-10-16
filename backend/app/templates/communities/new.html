@@ -1,12 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Create community | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Create community | X-Social{% endblock %}
 {% block content %}
 <section class="profile-layout community-create-layout">
-  <header class="profile-heading">
-    <p class="eyebrow">Start a gathering</p>
-    <h1>Create a community.</h1>
-    <p>Choose a clear name and decide whether anyone can find it.</p>
-  </header>
+  {{ page_heading('Start a gathering', 'Create a community.', 'Choose a clear name and decide whether anyone can find it.') }}
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/communities" class="profile-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -1,11 +1,11 @@
-"""Signed-out landing page and the finite updates window."""
+"""Signed-out landing page, the signed-in dashboard, and the finite updates window."""
 
 from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
-from app.api.deps import authenticated_user
+from app.api.deps import authenticated_user, current_session
 from app.api.responses import render
 from app.core.database import get_db
 from app.models import Community, CommunityMembership, Post, User, UserRelationship
@@ -18,12 +18,15 @@ router = APIRouter()
 def home(request: Request, database: Session = Depends(get_db)):
     user = authenticated_user(request, database)
     if user is not None:
-        return RedirectResponse("/conversations", status_code=303)
+        return RedirectResponse("/dashboard", status_code=303)
     return render(request, "home.html", {"user": user})
 
 
-@router.get("/updates", response_class=HTMLResponse)
-def updates_page(
+# The signed-in landing page: the finite window of posts, plus the composer that publishes a
+# personal update into it. Reads stay scoped to followed people and joined communities; the
+# author reads their own posts back here rather than only on the profile.
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(
     request: Request,
     source: str | None = None,
     days: int | None = None,
@@ -64,7 +67,16 @@ def updates_page(
         Community.id.in_(joined_communities),
     ]
     if source in {"all", "people"}:
-        source_conditions.append(Post.author_id.in_(followed_authors))
+        # The reader's own posts come back whatever their audience, and a followed author's
+        # posts arrive unless the author kept them to themselves. An `everyone` post from an
+        # account the reader does not follow is not a feed entry — the author's page is where
+        # a stranger meets it.
+        source_conditions.append(
+            and_(
+                or_(Post.author_id.in_(followed_authors), Post.author_id == user.id),
+                or_(Post.author_id == user.id, Post.audience.in_(("followers", "everyone"))),
+            )
+        )
         # A personal update has no community to gate on: the author's followers are its
         # audience, and this source is exactly the list of people the reader follows.
         visibility_conditions.append(Post.community_id.is_(None))
@@ -121,7 +133,7 @@ def updates_page(
     next_cursor = encode_updates_cursor(page_rows[-1][0], window_end) if has_more else None
     return render(
         request,
-        "updates.html",
+        "dashboard.html",
         {
             "user": user,
             "source": source,
@@ -132,5 +144,15 @@ def updates_page(
             "has_more": has_more,
             "next_cursor": next_cursor,
             "window_end": window_end,
+            # The shell's account menu logs out from a form, so every page it renders on needs
+            # the token. This page has no form of its own, hence the explicit value.
+            "csrf_token": current_session(request, database).csrf_token,
         },
     )
+
+
+@router.get("/updates", response_class=HTMLResponse, include_in_schema=False)
+def updates_page_moved(request: Request):
+    """The dashboard replaced this page; keep old links and in-flight cursors working."""
+    query = request.url.query
+    return RedirectResponse(f"/dashboard?{query}" if query else "/dashboard", status_code=301)

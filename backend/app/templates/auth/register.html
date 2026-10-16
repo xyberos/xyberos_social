@@ -1,17 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Create account | Soccom{% endblock %}
+{% from "partials/auth_layout.html" import auth_layout %}
+{% block title %}Create account | X-Social{% endblock %}
 {% block content %}
-<section class="auth-layout">
-  <div class="auth-aside">
-    <p class="eyebrow">Make yourself at home</p>
-    <h1>A little more<br><em>intentional.</em></h1>
-    <p>Choose your name and set up your account. You decide what you follow and when you’re done.</p>
-  </div>
-  <div class="auth-panel">
-    <div class="panel-heading">
-      <p class="eyebrow">New here?</p>
-      <h2>Create your account</h2>
-    </div>
+{% call auth_layout(
+  {'eyebrow': 'Make yourself at home', 'title': 'A little more', 'emphasis': 'intentional.',
+   'lede': 'Choose your name and set up your account. You decide what you follow and when you’re done.'},
+  {'eyebrow': 'New here?', 'title': 'Create your account'}) %}
     {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
     <form method="post" action="/register" class="form-stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -24,6 +18,5 @@
     </form>
     <p class="form-footnote">You can sign in as soon as your account is created.</p>
     <p class="form-footnote">Already have an account? <a href="/login">Sign in</a></p>
-  </div>
-</section>
+{% endcall %}
 {% endblock %}

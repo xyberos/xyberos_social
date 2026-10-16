@@ -51,7 +51,7 @@ def communities_page(
     browser_session = current_session(request, database) if user else None
     return render(
         request,
-        "communities.html",
+        "communities/list.html",
         {
             "user": user,
             "communities": communities,
@@ -70,7 +70,7 @@ def new_community_page(
     if user is None:
         return RedirectResponse("/login", status_code=303)
     browser_session = current_session(request, database)
-    return render(request, "community_new.html", form_context(browser_session, user=user))
+    return render(request, "communities/new.html", form_context(browser_session, user=user))
 
 
 @router.post("/communities")
@@ -101,7 +101,7 @@ def create_community(
     if error:
         return render(
             request,
-            "community_new.html",
+            "communities/new.html",
             form_context(
                 browser_session,
                 user=user,
@@ -141,7 +141,7 @@ def create_community(
         database.rollback()
         return render(
             request,
-            "community_new.html",
+            "communities/new.html",
             form_context(
                 browser_session, user=user, error="That community address is already in use."
             ),
@@ -185,7 +185,7 @@ def community_detail(
     browser_session = current_session(request, database) if user else None
     return render(
         request,
-        "community_detail.html",
+        "communities/detail.html",
         {
             "user": user,
             "community": community,

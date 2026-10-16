@@ -1,15 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Communities | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Communities | X-Social{% endblock %}
 {% block content %}
 <section class="directory-layout">
-  <header class="directory-heading heading-with-action">
-    <div>
-      <p class="eyebrow">Shared interests</p>
-      <h1>Communities</h1>
-      <p>Public communities are open to browse. Private spaces are invite-only.</p>
-    </div>
+  {% call page_heading('Shared interests', 'Communities', 'Public communities are open to browse. Private spaces are invite-only.') %}
     {% if user %}<a class="button button-primary" href="/communities/new"><span class="material-symbols-rounded" aria-hidden="true">add_circle</span>Create community</a>{% endif %}
-  </header>
+  {% endcall %}
   <div class="directory-list">
     {% for community in communities %}
       <article class="community-row">

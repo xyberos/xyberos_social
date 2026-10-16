@@ -1,23 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Settings | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Settings | X-Social{% endblock %}
 {% block content %}
 <section class="settings-layout">
-  <header class="settings-heading">
-    <div>
-      <p class="eyebrow">Account / Preferences</p>
-      <h1>Settings</h1>
-      <p>Choose what you see and what reaches your inbox.</p>
-    </div>
+  {% call page_heading('Account / Preferences', 'Settings', 'Choose what you see and what reaches your inbox.') %}
     <a class="text-button" href="/profile"><span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>Profile</a>
-  </header>
+  {% endcall %}
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
   {% if saved %}<p class="success" role="status">Settings saved.</p>{% endif %}
   <form method="post" action="/settings" class="settings-form settings-preferences">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <section class="settings-section" aria-labelledby="updates-settings-title">
+    <section class="settings-section" aria-labelledby="dashboard-settings-title">
       <div class="section-heading">
         <p class="eyebrow">A finite window</p>
-        <h2 id="updates-settings-title">Updates</h2>
+        <h2 id="dashboard-settings-title">Dashboard</h2>
       </div>
       <div class="settings-fields">
         <label>Sources
@@ -79,7 +75,7 @@
   </section>
   <form method="post" action="/logout" class="logout-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Sign out</button>
+    <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Log out</button>
   </form>
 </section>
 {% endblock %}

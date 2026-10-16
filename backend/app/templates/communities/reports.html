@@ -1,13 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Moderation queue | {{ community.name }} | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Moderation queue | {{ community.name }} | X-Social{% endblock %}
 {% block content %}
 <section class="directory-layout report-queue-layout">
   <a class="back-link" href="/communities/{{ community.slug }}">← {{ community.name }}</a>
-  <header class="directory-heading">
-    <p class="eyebrow">Community moderation</p>
-    <h1>Open reports</h1>
-    <p>Review each report and record a decision. Content removal is visible in the moderation history.</p>
-  </header>
+  {{ page_heading('Community moderation', 'Open reports', 'Review each report and record a decision. Content removal is visible in the moderation history.') }}
   <div class="report-list">
     {% for item in reports %}
       <article class="report-card">

@@ -108,7 +108,7 @@ def conversation_inbox(
     browser_session = current_session(request, database)
     return render(
         request,
-        "conversation_inbox.html",
+        "chat/inbox.html",
         {
             "user": user,
             "conversations": conversations,
@@ -177,7 +177,7 @@ def new_group_conversation_page(
     if user is None:
         return RedirectResponse("/login", status_code=303)
     browser_session = current_session(request, database)
-    return render(request, "conversation_new.html", form_context(browser_session, user=user))
+    return render(request, "chat/new.html", form_context(browser_session, user=user))
 
 
 @router.post("/conversations/groups")
@@ -220,7 +220,7 @@ def create_group_conversation(
     if error:
         return render(
             request,
-            "conversation_new.html",
+            "chat/new.html",
             form_context(browser_session, user=user, error=error, title=title, usernames=usernames),
             status_code=422,
         )
@@ -352,7 +352,7 @@ def conversation_detail(
     browser_session = current_session(request, database)
     return render(
         request,
-        "conversation_detail.html",
+        "chat/conversation.html",
         {
             "user": user,
             "conversation": conversation,

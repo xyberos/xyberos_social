@@ -1,3 +1,4 @@
+import re
 from urllib.parse import parse_qs, urlparse
 
 import app.api.routes.identity as identity_routes
@@ -27,8 +28,11 @@ def test_register_creates_account_and_starts_session(client):
     response = register(client)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/conversations"
+    assert response.headers["location"] == "/dashboard"
     assert "httponly" in response.headers["set-cookie"].lower()
+    dashboard = client.get("/dashboard")
+    assert dashboard.status_code == 200
+    assert 'href="/posts/new"' in dashboard.text
     inbox = client.get("/conversations")
     assert inbox.status_code == 200
     assert "Your inbox is quiet" in inbox.text
@@ -82,6 +86,51 @@ def test_login_and_logout(client):
     )
     assert response.status_code == 303
     assert client.get("/profile").status_code == 200
+
+
+def menu_logout_token(page: str) -> str:
+    """The token from the account menu's logout form, which the shell renders on every page."""
+    menu = page.split('class="account-menu"', 1)
+    assert len(menu) == 2, "the page has no account menu"
+    match = re.search(
+        r'action="/logout">\s*<input type="hidden" name="csrf_token" value="([^"]+)"', menu[1]
+    )
+    assert match, "the account menu has no logout form with a token"
+    return match.group(1)
+
+
+def test_the_account_menu_offers_profile_and_a_working_logout(client):
+    """The menu lives in the shell, so every signed-in page must render its token."""
+    register(client)
+    for path in (
+        "/dashboard",
+        "/workspace",
+        "/profile",
+        "/settings",
+        "/notifications",
+        "/people",
+        "/communities",
+        "/conversations",
+        "/posts/new",
+    ):
+        page = client.get(path)
+        assert page.status_code == 200, path
+        # The menu opts out of the boosted header: these navigations replace the whole shell,
+        # and a #main-content swap would leave the open menu and the rail behind on logout.
+        assert '<details class="account-menu" hx-boost="false">' in page.text, path
+        menu = page.text.split('class="account-menu"', 1)[1]
+        assert 'href="/profile"' in menu, path
+        assert 'href="/settings"' in menu, path
+        menu_logout_token(page.text)
+
+    # The dashboard has no form of its own, so logging out from its menu proves the shell's
+    # form is wired everywhere the menu appears.
+    dashboard = client.get("/dashboard")
+    logged_out = client.post(
+        "/logout", data={"csrf_token": menu_logout_token(dashboard.text)}, follow_redirects=False
+    )
+    assert logged_out.status_code == 303
+    assert client.get("/dashboard", follow_redirects=False).headers["location"] == "/login"
 
 
 def test_password_reset_is_generic_and_one_time(client, monkeypatch):

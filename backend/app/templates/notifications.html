@@ -1,15 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Notifications | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Notifications | X-Social{% endblock %}
 {% block content %}
 <section class="notifications-layout">
-  <header class="notifications-heading">
-    <div>
-      <p class="eyebrow">Account / Inbox</p>
-      <h1>Notifications</h1>
-      <p>{{ unread_count }} unread</p>
-    </div>
-    <a class="button button-quiet" href="/profile"><span class="material-symbols-rounded" aria-hidden="true">tune</span>Notification settings</a>
-  </header>
+  {% call page_heading('Account / Inbox', 'Notifications', unread_count ~ ' unread') %}
+    <!-- <a class="button button-quiet" href="/profile"><span class="material-symbols-rounded" aria-hidden="true">tune</span>Notification settings</a> -->
+  {% endcall %}
 
   {% if notifications %}
     <div class="notification-actions">
@@ -27,6 +23,7 @@
     <div class="notification-list" aria-label="Your notifications">
       {% for notification, actor in notifications %}
         <article class="notification-row {% if not notification.read_at %}notification-unread{% endif %}">
+          <div class="notification-icon" aria-hidden="true"><span class="material-symbols-rounded">{{ "forum" if notification.category == "reply" else "shield" }}</span></div>
           <div class="notification-copy">
             <div class="notification-meta">
               <span>{{ "Reply" if notification.category == "reply" else "Moderation" }}</span>

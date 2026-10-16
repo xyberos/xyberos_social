@@ -105,7 +105,7 @@ def begin_authenticated_session(
     )
     database.add(browser_session)
     database.commit()
-    response = RedirectResponse("/conversations", status_code=303)
+    response = RedirectResponse("/dashboard", status_code=303)
     set_session_cookie(response, raw_token)
     return response
 

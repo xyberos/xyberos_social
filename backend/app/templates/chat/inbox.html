@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Inbox | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Inbox | X-Social{% endblock %}
 {% block content %}
 <section class="inbox-layout">
-  <header class="inbox-heading">
-    <div><p class="eyebrow">Your conversations</p><h1>Inbox</h1></div>
+  {% call page_heading('Your conversations', 'Inbox', none) %}
     <a class="button button-primary" href="/conversations/new"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>New group</a>
-  </header>
+  {% endcall %}
   <div class="inbox-list">
     {% for item in conversations %}
       <a class="inbox-row" href="/conversations/{{ item.conversation.id }}">

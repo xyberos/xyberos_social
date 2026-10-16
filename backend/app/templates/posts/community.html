@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{% from "partials/comment_tree.html" import show_comment %}
+{% from "partials/post_view.html" import show_post_card %}
+{% from "partials/comments_section.html" import show_comments %}
 {% set comments_base = '/communities/' ~ community.slug ~ '/posts/' ~ post.id ~ '/comments' %}
-{% block title %}{{ post.title }} | {{ community.name }} | Soccom{% endblock %}
+{% block title %}{{ post.title }} | {{ community.name }} | X-Social{% endblock %}
 {% block content %}
 <section class="thread-layout">
   <a class="back-link" href="/communities/{{ community.slug }}">← {{ community.name }}</a>
@@ -9,14 +10,8 @@
   {% if error == 'invalid-report' %}<p class="alert" role="alert">Add a short reason for the report.</p>{% endif %}
   {% if error == 'slow-down' %}<p class="alert" role="alert">You’re replying too quickly. Try again in a moment.</p>{% endif %}
   {% if error == 'invalid-comment' %}<p class="alert" role="alert">Comments must contain 1–5,000 characters.</p>{% endif %}
-  <article class="thread-post">
-    <div class="post-meta"><a href="/communities/{{ community.slug }}">/c/{{ community.slug }}</a><span>{{ author.display_name }} · @{{ author.username }}</span><time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%b %d, %Y · %H:%M') }}</time>{% if post.is_locked %}<span class="locked-label">Locked</span>{% endif %}</div>
-    {% if post.removed_at %}
-      <h1 class="removed-copy">This post was removed.</h1>
-    {% else %}
-      <h1>{{ post.title }}</h1>
-      {% if post.body %}<p class="thread-body">{{ post.body }}</p>{% endif %}
-    {% endif %}
+
+  {% call show_post_card(post, author, community, none) %}
     <div class="thread-actions">
       {% if user and not post.removed_at and user.id != post.author_id and ('post', post.id) not in reported %}
         <details class="report-details"><summary>Report post</summary>
@@ -42,24 +37,16 @@
         </form>
       {% endif %}
     </div>
-  </article>
+  {% endcall %}
 
-  <section id="comments" class="thread-comments" aria-labelledby="comments-title">
-    <header class="section-heading"><div><p class="eyebrow">The conversation</p><h2 id="comments-title">Comments</h2></div></header>
-    {% if user and role and not post.is_locked and not post.removed_at %}
-      <form method="post" action="/communities/{{ community.slug }}/posts/{{ post.id }}/comments" class="comment-compose">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="visually-hidden" for="comment-body">Write a comment</label>
-        <textarea id="comment-body" name="body" rows="3" maxlength="5000" placeholder="Add to the conversation" required></textarea>
-        <div class="compose-footer"><small>Up to 5,000 characters</small><button class="button button-primary" type="submit">Comment</button></div>
-      </form>
-    {% elif user and post.is_locked %}<p class="locked-notice">This discussion is locked. New replies are closed.</p>
-    {% elif user and not role %}<p class="support-copy">Join the community to comment.</p>
-    {% endif %}
-    <div class="comment-list">
-      {% for node in comments %}{{ show_comment(node, user, post, csrf_token, comments_base, user and role and not post.is_locked and not post.removed_at, manager, '/communities/' ~ community.slug ~ '/reports/comment', reported) }}{% else %}<p class="empty-state">No comments yet.</p>{% endfor %}
-    </div>
-  </section>
+  {% if user and post.is_locked %}
+    {% set notice = ('locked-notice', 'This discussion is locked. New replies are closed.') %}
+  {% elif user and not role %}
+    {% set notice = ('support-copy', 'Join the community to comment.') %}
+  {% else %}
+    {% set notice = none %}
+  {% endif %}
+  {{ show_comments(post, user, comments, csrf_token, comments_base, user and role and not post.is_locked and not post.removed_at, manager, '/communities/' ~ community.slug ~ '/reports/comment', reported, notice) }}
 
   {% if events %}
     <section class="audit-section"><div class="section-heading"><div><p class="eyebrow">Accountability</p><h2>Moderation history</h2></div></div>

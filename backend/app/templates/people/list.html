@@ -1,12 +1,9 @@
 {% extends "base.html" %}
-{% block title %}People | Soccom{% endblock %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}People | X-Social{% endblock %}
 {% block content %}
 <section class="directory-layout">
-  <header class="directory-heading">
-    <p class="eyebrow">Your social graph</p>
-    <h1>People</h1>
-    <p>Choose who to follow. Blocking removes follows in both directions.</p>
-  </header>
+  {{ page_heading('Your social graph', 'People', 'Choose who to follow. Blocking removes follows in both directions.') }}
   {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
   <div class="directory-list">
     {% for person in people %}

@@ -17,6 +17,8 @@ from app.core.observability import (
 )
 from app.main import app
 
+from conftest import create_account
+
 
 def test_request_id_is_generated_and_returned(client):
     response = client.get("/healthz")
@@ -50,6 +52,37 @@ def test_security_headers_cover_framing_and_connections(client):
     assert "strict-transport-security" not in response.headers
 
 
+def test_a_redirect_on_an_htmx_request_becomes_a_full_navigation(client):
+    """A boosted link swaps one piece of the page, so it cannot render a different shell.
+
+    This is the expired-session path: the page a signed-in visitor is looking at belongs to a
+    session the server no longer knows, and the answer has to replace that whole page.
+    """
+    plain = client.get("/dashboard", follow_redirects=False)
+    assert plain.status_code == 303
+    assert plain.headers["location"] == "/login"
+
+    boosted = client.get("/dashboard", headers={"HX-Request": "true"}, follow_redirects=False)
+    assert boosted.status_code == 200
+    assert boosted.headers["hx-redirect"] == "/login"
+    assert boosted.text == ""
+    # The conversion replaces the body, not the response: its other headers still reach the
+    # client, request id included.
+    assert boosted.headers["x-request-id"]
+    assert "content-type" not in boosted.headers
+
+
+def test_an_htmx_request_that_resolves_keeps_its_normal_answer(client_factory):
+    signed_in = client_factory()
+    assert create_account(signed_in, "ada@example.com", "ada").status_code == 303
+
+    response = signed_in.get("/dashboard", headers={"HX-Request": "true"})
+
+    assert response.status_code == 200
+    assert "hx-redirect" not in response.headers
+    assert 'id="main-content"' in response.text
+
+
 @pytest.mark.parametrize("path", ["/docs", "/docs/oauth2-redirect", "/redoc"])
 def test_docs_pages_get_a_csp_that_allows_the_swagger_assets(client, path):
     response = client.get(path)
@@ -69,7 +102,7 @@ def test_application_routes_keep_the_strict_csp(client):
 
 
 def test_static_assets_revalidate_instead_of_being_cached_heuristically(client):
-    response = client.get("/static/styles.css")
+    response = client.get("/static/css/styles.css")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache"

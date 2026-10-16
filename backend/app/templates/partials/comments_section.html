@@ -1,0 +1,22 @@
+{# The comment thread under a post view, shared by both kinds of post. `notice` is an optional
+   (css class, text) pair shown instead of the composer when the reader may not reply: a locked
+   discussion, a removed post, or a community the reader has not joined. An empty
+   `report_url_prefix` hides comment reporting entirely, as a personal update has no moderator. #}
+{% from "partials/comment_tree.html" import show_comment %}
+
+{% macro show_comments(post, user, comments, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported, notice) %}
+  <section id="comments" class="thread-comments" aria-labelledby="comments-title">
+    <header class="section-heading"><div><p class="eyebrow">The conversation</p><h2 id="comments-title">Comments</h2></div></header>
+    {% if can_comment %}
+      <form method="post" action="{{ comments_base }}" class="comment-compose">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="visually-hidden" for="comment-body">Write a comment</label>
+        <textarea id="comment-body" name="body" rows="3" maxlength="5000" placeholder="Add to the conversation" required></textarea>
+        <div class="compose-footer"><small>Up to 5,000 characters</small><button class="button button-primary" type="submit">Comment</button></div>
+      </form>
+    {% elif notice %}<p class="{{ notice[0] }}">{{ notice[1] }}</p>{% endif %}
+    <div class="comment-list">
+      {% for node in comments %}{{ show_comment(node, user, post, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported) }}{% else %}<p class="empty-state">No comments yet.</p>{% endfor %}
+    </div>
+  </section>
+{% endmacro %}

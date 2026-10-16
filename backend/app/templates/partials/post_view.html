@@ -1,0 +1,28 @@
+{# One post view for both kinds of post. A personal update and a community post differ in the
+   byline, the wording of a removal, and the actions the reader may take — everything else,
+   including the comment thread, is shared. `author_url` is optional: a community post shows
+   the handle as text because the thread already names the community it belongs to. #}
+{% macro show_post_card(post, author, community, author_url) %}
+  <article class="thread-post">
+    <div class="post-head">
+      <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
+      <div class="post-byline">
+        <span class="post-author">{{ author.display_name }}</span>
+        <p class="post-meta">
+          {% if community %}<a href="/communities/{{ community.slug }}">/c/{{ community.slug }}</a>{% endif %}
+          {% if author_url %}<a href="{{ author_url }}">@{{ author.username }}</a>{% else %}<span>@{{ author.username }}</span>{% endif %}
+          <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%b %d, %Y · %H:%M') }}</time>
+          {% if post.is_locked %}<span class="locked-label">Locked</span>{% endif %}
+          {% if not community %}<span class="muted-status">Personal update</span>{% endif %}
+        </p>
+      </div>
+    </div>
+    {% if post.removed_at %}
+      <h1 class="removed-copy">{{ 'This post was removed.' if community else 'This update was removed.' }}</h1>
+    {% else %}
+      {% if post.title %}<h1>{{ post.title }}</h1>{% endif %}
+      {% if post.body %}<p class="thread-body">{{ post.body }}</p>{% endif %}
+    {% endif %}
+    {{ caller() }}
+  </article>
+{% endmacro %}

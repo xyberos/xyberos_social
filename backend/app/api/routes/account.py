@@ -41,6 +41,7 @@ from app.services.attachments import delete_attachments_for_owner
 from app.services.audit import record_audit
 from app.services.communities import delete_unowned_community, record_community_audit
 from app.services.outbox import enqueue_event
+from app.services import workspace
 
 router = APIRouter()
 
@@ -55,24 +56,44 @@ def profile_page(
     if user is None:
         return RedirectResponse("/login", status_code=303)
     browser_session = current_session(request, database)
-    posts = database.scalars(
-        select(Post)
-        .where(
-            Post.author_id == user.id,
-            Post.community_id.is_(None),
-            Post.removed_at.is_(None),
-        )
-        .order_by(Post.created_at.desc(), Post.id.desc())
-        .limit(20)
-    ).all()
+    # The profile is identity and the account fields; everything the reader has published, and
+    # the withdraw action for it, lives on the workspace.
+    return render(request, "account/profile.html", form_context(browser_session, user=user))
+
+
+# The workspace manages everything the reader has published: a bounded keyset window over both
+# kinds of post, with the author's own withdraw action on each row.
+@router.get("/workspace", response_class=HTMLResponse)
+def workspace_page(
+    request: Request,
+    source: str = "all",
+    cursor: str | None = None,
+    database: Session = Depends(get_db),
+):
+    user = authenticated_user(request, database)
+    browser_session = current_session(request, database)
+    if user is None or browser_session is None:
+        return RedirectResponse("/login", status_code=303)
+    if source not in workspace.SOURCES:
+        raise HTTPException(status_code=422, detail="Choose a valid filter.")
+    posts, next_cursor = workspace.list_posts(
+        database,
+        user.id,
+        source,
+        workspace.decode_cursor(cursor) if cursor else None,
+        workspace.PAGE_SIZE,
+    )
     return render(
         request,
-        "profile.html",
+        "account/workspace.html",
         form_context(
             browser_session,
             user=user,
+            source=source,
             posts=posts,
-            post_error=request.query_params.get("error"),
+            count=len(posts),
+            total=workspace.count_posts(database, user.id, source),
+            next_cursor=next_cursor,
         ),
     )
 
@@ -95,7 +116,7 @@ def update_profile(
     if not display_name or len(display_name) > 80 or len(bio) > 280:
         return render(
             request,
-            "settings.html",
+            "account/settings.html",
             form_context(
                 browser_session,
                 user=user,
@@ -119,7 +140,7 @@ def settings_page(request: Request, database: Session = Depends(get_db)):
     browser_session = current_session(request, database)
     return render(
         request,
-        "settings.html",
+        "account/settings.html",
         form_context(browser_session, user=user, saved=request.query_params.get("saved")),
     )
 
@@ -144,7 +165,7 @@ def update_settings(
     ):
         return render(
             request,
-            "settings.html",
+            "account/settings.html",
             form_context(browser_session, user=user, error="Choose valid update defaults."),
             status_code=422,
         )
@@ -366,7 +387,7 @@ def delete_account(
     if confirmation != "DELETE":
         return render(
             request,
-            "settings.html",
+            "account/settings.html",
             form_context(
                 browser_session,
                 user=user,
@@ -377,7 +398,7 @@ def delete_account(
     if not verify_password(password, user.password_hash):
         return render(
             request,
-            "profile.html",
+            "account/profile.html",
             form_context(browser_session, user=user, error="The current password is incorrect."),
             status_code=403,
         )
@@ -471,4 +492,4 @@ def delete_account(
 
 @router.get("/account-deleted", response_class=HTMLResponse)
 def account_deleted_page(request: Request):
-    return render(request, "account_deleted.html", {"user": None})
+    return render(request, "account/deleted.html", {"user": None})

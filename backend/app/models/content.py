@@ -21,6 +21,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
+# Who may read a personal update. A community post carries the default: its audience is the
+# community's membership rather than a choice made on the post itself.
+AUDIENCES = ("only_me", "followers", "everyone")
+
 
 class Post(Base):
     """A post belongs to a community, or to an account when it is a personal update.
@@ -39,6 +43,12 @@ class Post(Base):
         ),
         CheckConstraint("title IS NULL OR length(title) <= 140", name="ck_post_title_length"),
         CheckConstraint("length(body) <= 10000", name="ck_post_body_length"),
+        CheckConstraint(
+            "audience IN ('only_me', 'followers', 'everyone')", name="ck_post_audience"
+        ),
+        CheckConstraint(
+            "community_id IS NULL OR audience = 'followers'", name="ck_post_audience_scope"
+        ),
         Index("ix_posts_community_created", "community_id", "created_at"),
         Index("ix_posts_author_created", "author_id", "created_at", "id"),
     )
@@ -52,6 +62,7 @@ class Post(Base):
     )
     title: Mapped[str | None] = mapped_column(String(140))
     body: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    audience: Mapped[str] = mapped_column(String(16), default="followers", nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     removed_by_user_id: Mapped[UUID | None] = mapped_column(

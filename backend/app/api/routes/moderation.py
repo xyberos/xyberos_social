@@ -133,7 +133,7 @@ def report_queue(
     browser_session = current_session(request, database)
     return render(
         request,
-        "report_queue.html",
+        "communities/reports.html",
         {
             "user": user,
             "community": community,

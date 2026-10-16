@@ -3,16 +3,16 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import or_, select
+from sqlalchemy import not_, or_, select
 from sqlalchemy.orm import Session
 from app.api.deps import authenticated_form_user, authenticated_user, current_session
 from app.api.responses import redirect_people, render
 from app.core.database import get_db
 from app.models import Post, User, UserRelationship
 from app.services.authorization import (
-    can_view_personal_posts,
     is_blocked_between,
     is_following,
+    visible_personal_posts_condition,
 )
 
 router = APIRouter()
@@ -73,7 +73,7 @@ def people_page(
     browser_session = current_session(request, database)
     return render(
         request,
-        "people.html",
+        "people/list.html",
         {
             "user": user,
             "people": people,
@@ -97,24 +97,38 @@ def person_profile(
         raise HTTPException(status_code=404, detail="User not found.")
     if person.id == viewer.id:
         return RedirectResponse("/profile", status_code=303)
-    # A profile always exists; only its updates depend on the follow relationship.
-    can_view_updates = can_view_personal_posts(database, viewer, person.id)
-    posts = []
-    if can_view_updates:
-        posts = database.scalars(
-            select(Post)
+    # A profile always exists; which of its updates it shows depends on each post's audience.
+    visible = visible_personal_posts_condition(database, viewer, person.id)
+    posts = database.scalars(
+        select(Post)
+        .where(
+            Post.author_id == person.id,
+            Post.community_id.is_(None),
+            Post.removed_at.is_(None),
+            visible,
+        )
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .limit(20)
+    ).all()
+    # The hint explains an empty list only when updates exist that this viewer may not read.
+    hidden_updates = (
+        not posts
+        and database.scalar(
+            select(Post.id)
             .where(
                 Post.author_id == person.id,
                 Post.community_id.is_(None),
                 Post.removed_at.is_(None),
+                not_(visible),
             )
-            .order_by(Post.created_at.desc(), Post.id.desc())
-            .limit(20)
-        ).all()
+            .limit(1)
+        )
+        is not None
+    )
     browser_session = current_session(request, database)
     return render(
         request,
-        "person.html",
+        "people/person.html",
         {
             "user": viewer,
             "person": person,
@@ -123,7 +137,7 @@ def person_profile(
             is not None,
             "blocked_you": database.get(UserRelationship, (person.id, viewer.id, "block"))
             is not None,
-            "can_view_updates": can_view_updates,
+            "hidden_updates": hidden_updates,
             "posts": posts,
             "message": request.query_params.get("message"),
             "csrf_token": browser_session.csrf_token if browser_session else None,

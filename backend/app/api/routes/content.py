@@ -12,11 +12,12 @@ from app.api.deps import (
     authenticated_user,
     client_key,
     current_session,
+    form_context,
 )
 from app.api.responses import render
 from app.core import events
 from app.core.database import get_db
-from app.models import Comment, ContentReport, ModerationEvent, Post, User
+from app.models import AUDIENCES, Comment, ContentReport, ModerationEvent, Post, User
 from app.core.scoping import account_scope, community_scope
 from app.core.security import check_rate_limit
 from app.services.authorization import (
@@ -126,7 +127,7 @@ def post_detail(
         ).all()
     return render(
         request,
-        "post_detail.html",
+        "posts/community.html",
         {
             "user": user,
             "community": community,
@@ -219,6 +220,7 @@ def remove_post(
     post_id: UUID,
     request: Request,
     csrf_token: str = Form(),
+    return_to: str = Form(""),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
@@ -241,7 +243,7 @@ def remove_post(
                 event=events.POST_REMOVED,
             )
         database.commit()
-    return RedirectResponse(f"/communities/{slug}", status_code=303)
+    return RedirectResponse(return_page(return_to, f"/communities/{slug}"), status_code=303)
 
 
 @router.post("/communities/{slug}/posts/{post_id}/lock")
@@ -308,6 +310,38 @@ def remove_comment(
     return RedirectResponse(f"/communities/{slug}/posts/{post.id}#comments", status_code=303)
 
 
+# Author-side post actions (publish, withdraw) return to the page that submitted them, so the
+# writer stays where they were. Anything unrecognized falls back to the action's own sensible
+# page, which keeps the choice from becoming an open redirect.
+RETURN_PAGES = {"/posts/new", "/workspace"}
+
+
+def return_page(return_to: str, fallback: str) -> str:
+    return return_to if return_to in RETURN_PAGES else fallback
+
+
+# The compose view the dashboard's "New post" entry opens. It is registered before
+# `/posts/{post_id}`, which would otherwise claim the literal path as a post id.
+@router.get("/posts/new", response_class=HTMLResponse)
+def compose_personal_post(
+    request: Request,
+    database: Session = Depends(get_db),
+):
+    user = authenticated_user(request, database)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    browser_session = current_session(request, database)
+    return render(
+        request,
+        "posts/new.html",
+        form_context(
+            browser_session,
+            user=user,
+            error=request.query_params.get("error"),
+        ),
+    )
+
+
 # A personal update belongs to its author instead of a community. The audience is the
 # author's followers, so there is no membership to check and no moderator to consult: the
 # author is the only privileged reader, and every refusal is a non-revealing 404.
@@ -316,17 +350,22 @@ def create_personal_post(
     request: Request,
     title: str = Form(""),
     body: str = Form(""),
+    audience: str = Form("followers"),
     csrf_token: str = Form(),
+    return_to: str = Form(""),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
     title = title.strip()
     body = body.strip()
+    origin = return_page(return_to, "/posts/new")
     if not check_rate_limit(client_key(request), "create-post", limit=5, seconds=60):
-        return RedirectResponse("/profile?error=slow-down", status_code=303)
+        return RedirectResponse(f"{origin}?error=slow-down", status_code=303)
     # The text carries the update; the title is optional context for it.
     if len(title) > 140 or not body or len(body) > 10000:
-        return RedirectResponse("/profile?error=invalid-post", status_code=303)
+        return RedirectResponse(f"{origin}?error=invalid-post", status_code=303)
+    if audience not in AUDIENCES:
+        return RedirectResponse(f"{origin}?error=invalid-audience", status_code=303)
     duplicate_since = datetime.now(UTC) - timedelta(hours=24)
     duplicate = database.scalar(
         select(Post.id).where(
@@ -339,8 +378,10 @@ def create_personal_post(
         )
     )
     if duplicate is not None:
-        return RedirectResponse("/profile?error=duplicate-post", status_code=303)
-    post = Post(community_id=None, author_id=user.id, title=title or None, body=body)
+        return RedirectResponse(f"{origin}?error=duplicate-post", status_code=303)
+    post = Post(
+        community_id=None, author_id=user.id, title=title or None, body=body, audience=audience
+    )
     database.add(post)
     database.flush()
     enqueue_event(
@@ -367,7 +408,7 @@ def personal_post_detail(
     browser_session = current_session(request, database) if user else None
     return render(
         request,
-        "personal_post.html",
+        "posts/personal.html",
         {
             "user": user,
             "post": post,
@@ -384,6 +425,7 @@ def remove_personal_post(
     post_id: UUID,
     request: Request,
     csrf_token: str = Form(),
+    return_to: str = Form(""),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
@@ -402,7 +444,41 @@ def remove_personal_post(
             payload={"author_id": str(user.id)},
         )
         database.commit()
-    return RedirectResponse("/profile", status_code=303)
+    # A withdrawal returns to the workspace, where the row now reads as withdrawn.
+    return RedirectResponse(return_page(return_to, "/workspace"), status_code=303)
+
+
+@router.post("/posts/{post_id}/audience")
+def set_personal_post_audience(
+    post_id: UUID,
+    request: Request,
+    audience: str = Form(),
+    csrf_token: str = Form(),
+    return_to: str = Form(""),
+    database: Session = Depends(get_db),
+):
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    post = find_personal_post(database, post_id, user)
+    if post.author_id != user.id:
+        raise HTTPException(status_code=403, detail="You cannot change this post.")
+    if post.removed_at is not None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if audience not in AUDIENCES:
+        raise HTTPException(status_code=422, detail="Choose a valid audience.")
+    if post.audience != audience:
+        post.audience = audience
+        # Who may read an update is a privacy boundary, so the change is recorded even though
+        # the row itself only holds the value it now has.
+        enqueue_event(
+            database,
+            event=events.POST_AUDIENCE_CHANGED,
+            aggregate_type="post",
+            aggregate_id=post.id,
+            scope=account_scope(user.id),
+            payload={"author_id": str(user.id), "audience": audience},
+        )
+        database.commit()
+    return RedirectResponse(return_page(return_to, "/workspace"), status_code=303)
 
 
 @router.post("/posts/{post_id}/comments")

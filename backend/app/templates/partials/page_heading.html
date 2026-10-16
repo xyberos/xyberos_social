@@ -1,0 +1,13 @@
+{# The eyebrow, title, and lede that open a page, plus an optional action block on the right
+   for the pages that also carry a button. Pages used to repeat near-identical heading markup
+   under six different class names. #}
+{% macro page_heading(eyebrow, title, lede) %}
+  <header class="page-heading">
+    <div class="page-heading-copy">
+      {% if eyebrow %}<p class="eyebrow">{{ eyebrow }}</p>{% endif %}
+      <h1>{{ title }}</h1>
+      {% if lede %}<p class="lede">{{ lede }}</p>{% endif %}
+    </div>
+    {% if caller %}<div class="page-heading-action">{{ caller() }}</div>{% endif %}
+  </header>
+{% endmacro %}

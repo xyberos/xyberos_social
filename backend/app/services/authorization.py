@@ -2,7 +2,7 @@
 
 from uuid import UUID
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import false, or_, select, true
 from sqlalchemy.orm import Session
 from app.models import Community, CommunityMembership, Post, User, UserRelationship
 
@@ -83,35 +83,49 @@ def is_following(database: Session, follower_id, author_id) -> bool:
     )
 
 
-def can_view_personal_posts(database: Session, viewer: User | None, author_id: UUID) -> bool:
-    """The per-row rule below, asked once for a whole profile page."""
+def can_read_personal_post(database: Session, viewer: User | None, post: Post) -> bool:
+    """The per-row audience rule: the author, and then whoever the audience names.
+
+    A block is absolute, so it hides an `everyone` post too; that is why the block is settled
+    before the audience is consulted. `visible_personal_posts_condition` states the same rule
+    as one SQL predicate for a page that lists a whole profile.
+    """
     if viewer is None:
         return False
-    if viewer.id == author_id:
+    if viewer.id == post.author_id:
         return True
-    if is_blocked_between(database, viewer.id, author_id):
+    if is_blocked_between(database, viewer.id, post.author_id):
         return False
-    return is_following(database, viewer.id, author_id)
+    if post.audience == "everyone":
+        return True
+    return post.audience == "followers" and is_following(database, viewer.id, post.author_id)
+
+
+def visible_personal_posts_condition(database: Session, viewer: User | None, author_id: UUID):
+    """`can_read_personal_post` as a predicate, asked once for a whole profile page."""
+    if viewer is not None and viewer.id == author_id:
+        return true()
+    if viewer is None or is_blocked_between(database, viewer.id, author_id):
+        return false()
+    if is_following(database, viewer.id, author_id):
+        return Post.audience.in_(("followers", "everyone"))
+    return Post.audience == "everyone"
 
 
 def find_personal_post(database: Session, post_id: UUID, user: User | None) -> Post:
-    """A personal update is readable by its author and by their followers, nobody else.
+    """A personal update, if the viewer's audience rule allows reading it.
 
-    Outsiders get the same 404 a missing post returns, so the page never confirms that a
-    private update exists.
+    Outsiders get the same 404 a missing post returns, so the page never confirms that a post
+    they may not read exists.
     """
     post = database.get(Post, post_id)
     if post is None or post.community_id is not None:
         raise HTTPException(status_code=404, detail="Post not found.")
-    if user is None or (
-        user.id != post.author_id and not is_following(database, user.id, post.author_id)
-    ):
-        raise HTTPException(status_code=404, detail="Post not found.")
-    if user.id != post.author_id and is_blocked_between(database, user.id, post.author_id):
+    if not can_read_personal_post(database, user, post):
         raise HTTPException(status_code=404, detail="Post not found.")
     # A removed update stays readable to its author, who is the only one who can restore or
     # clear it, and disappears for everyone else.
-    if post.removed_at is not None and user.id != post.author_id:
+    if post.removed_at is not None and (user is None or user.id != post.author_id):
         raise HTTPException(status_code=404, detail="Post not found.")
     return post
 

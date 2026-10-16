@@ -75,12 +75,12 @@ def test_updates_respect_sources_private_communities_and_blocks(client_factory):
     ).status_code == 303
     create_post(community_author, "joined-updates", "Joined community post")
 
-    people_updates = viewer.get("/updates?source=people&days=7&limit=10")
+    people_updates = viewer.get("/dashboard?source=people&days=7&limit=10")
     assert "Followed public post" in people_updates.text
     assert "Followed private post" not in people_updates.text
     assert "Joined community post" not in people_updates.text
 
-    community_updates = viewer.get("/updates?source=communities&days=7&limit=10")
+    community_updates = viewer.get("/dashboard?source=communities&days=7&limit=10")
     assert "Joined community post" in community_updates.text
     assert "Followed public post" in community_updates.text
     assert "Followed private post" not in community_updates.text
@@ -92,7 +92,7 @@ def test_updates_respect_sources_private_communities_and_blocks(client_factory):
         follow_redirects=False,
     )
     assert blocked.status_code == 303
-    blocked_updates = viewer.get("/updates?source=communities&days=7&limit=10")
+    blocked_updates = viewer.get("/dashboard?source=communities&days=7&limit=10")
     assert "Followed public post" not in blocked_updates.text
     assert "Joined community post" in blocked_updates.text
 
@@ -117,7 +117,7 @@ def test_updates_are_bounded_and_continue_with_stable_keyset(client_factory):
     )
     assert saved.status_code == 303
 
-    first_batch = client.get("/updates")
+    first_batch = client.get("/dashboard")
     assert first_batch.status_code == 200
     assert len(re.findall(r"<article class=\"post-preview\">", first_batch.text)) == 1
     assert "Load next batch" in first_batch.text
@@ -131,5 +131,18 @@ def test_updates_are_bounded_and_continue_with_stable_keyset(client_factory):
     second_id = re.search(r"/posts/([0-9a-f-]+)", second_batch.text).group(1)
     assert first_id != second_id, (first_title, second_title, first_id, second_id)
 
-    assert client.get("/updates?limit=100").status_code == 422
-    assert client.get("/updates?cursor=invalid").status_code == 422
+    assert client.get("/dashboard?limit=100").status_code == 422
+    assert client.get("/dashboard?cursor=invalid").status_code == 422
+
+
+def test_the_old_updates_url_still_reaches_the_dashboard(client_factory):
+    client = client_factory()
+    assert create_account(client, "moved@example.com", "moveduser").status_code == 303
+
+    moved = client.get("/updates?source=people&days=7&limit=10", follow_redirects=False)
+    assert moved.status_code == 301
+    assert moved.headers["location"] == "/dashboard?source=people&days=7&limit=10"
+
+    plain = client.get("/updates", follow_redirects=False)
+    assert plain.status_code == 301
+    assert plain.headers["location"] == "/dashboard"

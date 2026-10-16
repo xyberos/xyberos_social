@@ -30,6 +30,7 @@ POST_REMOVED = "post.removed"
 POST_LOCKED = "post.locked"
 POST_UNLOCKED = "post.unlocked"
 POST_REPORTED = "post.reported"
+POST_AUDIENCE_CHANGED = "post.audience.changed"
 COMMENT_CREATED = "comment.created"
 COMMENT_REMOVED = "comment.removed"
 COMMENT_REPORTED = "comment.reported"
@@ -56,6 +57,7 @@ SOCIAL_EVENTS = (
     POST_LOCKED,
     POST_UNLOCKED,
     POST_REPORTED,
+    POST_AUDIENCE_CHANGED,
     COMMENT_CREATED,
     COMMENT_REMOVED,
     COMMENT_REPORTED,

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Workspace | X-Social{% endblock %}
+{% block content %}
+<section class="workspace-layout">
+  {% call page_heading('Your account', 'Workspace', 'Everything you have published, newest first. Open it, or withdraw it when you are done with it.') %}
+    <a class="button button-primary" href="/posts/new"><span class="material-symbols-rounded" aria-hidden="true">edit_square</span>New post</a>
+  {% endcall %}
+
+  <nav class="filter-row" aria-label="Filter your posts">
+    <a class="filter-chip" href="/workspace?source=all" {% if source == 'all' %}aria-current="true"{% endif %}>All</a>
+    <a class="filter-chip" href="/workspace?source=personal" {% if source == 'personal' %}aria-current="true"{% endif %}>Personal updates</a>
+    <a class="filter-chip" href="/workspace?source=communities" {% if source == 'communities' %}aria-current="true"{% endif %}>Community posts</a>
+  </nav>
+
+  <p class="workspace-status" role="status">
+    <strong>Showing {{ count }} of {{ total }} {{ 'post' if total == 1 else 'posts' }}</strong>
+    <span>Withdrawn posts stay listed here; nobody else reads them.</span>
+  </p>
+
+  {% if posts %}
+    <div class="workspace-list">
+      {% for post, community, openable in posts %}
+        {% set post_url = '/communities/' ~ community.slug ~ '/posts/' ~ post.id if community else '/posts/' ~ post.id %}
+        {% set withdraw_url = '/communities/' ~ community.slug ~ '/posts/' ~ post.id ~ '/remove' if community else '/posts/' ~ post.id ~ '/remove' %}
+        <article class="workspace-row">
+          <div class="workspace-row-meta">
+            {% if community %}<a class="workspace-community" href="/communities/{{ community.slug }}">{{ community.name }}</a>
+            {% else %}<span class="workspace-community">Personal update</span>{% endif %}
+            <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+            {% if post.removed_at %}<span class="kind-badge">Withdrawn</span>{% endif %}
+            {% if not openable %}<span class="kind-badge">Community left</span>{% endif %}
+          </div>
+          <h2 class="workspace-title">
+            {% if openable %}<a href="{{ post_url }}">{{ post.title or post.body[:90] }}</a>
+            {% else %}{{ post.title or post.body[:90] }}{% endif %}
+          </h2>
+          {% if post.title and post.body %}<p class="workspace-excerpt">{{ post.body[:140] }}{% if post.body|length > 140 %}…{% endif %}</p>{% endif %}
+          <div class="workspace-row-actions">
+            {% if openable %}<a class="text-button" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>Open</a>{% endif %}
+            {% if not community and not post.removed_at %}
+              <form method="post" action="/posts/{{ post.id }}/audience" class="workspace-audience">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="return_to" value="/workspace">
+                <label for="audience-{{ post.id }}">Who can see it</label>
+                <select id="audience-{{ post.id }}" name="audience">
+                  <option value="only_me" {% if post.audience == 'only_me' %}selected{% endif %}>Only me</option>
+                  <option value="followers" {% if post.audience == 'followers' %}selected{% endif %}>Followers</option>
+                  <option value="everyone" {% if post.audience == 'everyone' %}selected{% endif %}>Everyone</option>
+                </select>
+                <button class="text-button" type="submit">Change</button>
+              </form>
+            {% endif %}
+            {% if openable and not post.removed_at %}
+              <form method="post" action="{{ withdraw_url }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="return_to" value="/workspace">
+                <button class="text-button danger-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">delete</span>Withdraw</button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="empty-card">Nothing published yet.</p>
+  {% endif %}
+
+  {% if next_cursor %}
+    <div class="window-finish">
+      <p>Showing the {{ count }} most recent. Older posts follow.</p>
+      <a class="button button-quiet" href="/workspace?source={{ source }}&amp;cursor={{ next_cursor }}"><span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span>Load more</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

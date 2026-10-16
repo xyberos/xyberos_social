@@ -1,0 +1,16 @@
+{# The two-column shell the sign-in, registration, and password pages share: the aside that
+   states the intent, and the panel that holds the form. `aside` takes eyebrow, title,
+   emphasis, and lede; `panel` takes eyebrow and title. #}
+{% macro auth_layout(aside, panel) %}
+  <section class="auth-layout">
+    <div class="auth-aside">
+      <p class="eyebrow">{{ aside.eyebrow }}</p>
+      <h1>{{ aside.title }}<br><em>{{ aside.emphasis }}</em></h1>
+      <p>{{ aside.lede }}</p>
+    </div>
+    <div class="auth-panel">
+      <div class="panel-heading"><p class="eyebrow">{{ panel.eyebrow }}</p><h2>{{ panel.title }}</h2></div>
+      {{ caller() }}
+    </div>
+  </section>
+{% endmacro %}

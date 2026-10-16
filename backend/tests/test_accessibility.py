@@ -121,7 +121,9 @@ def test_signed_in_pages_are_usable(client_factory):
     for path in (
         "/people",
         "/communities",
-        "/updates",
+        "/dashboard",
+        "/workspace",
+        "/posts/new",
         "/notifications",
         "/settings",
         "/profile",

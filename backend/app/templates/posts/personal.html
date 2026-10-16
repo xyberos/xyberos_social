@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "partials/post_view.html" import show_post_card %}
+{% from "partials/comments_section.html" import show_comments %}
+{% set comments_base = '/posts/' ~ post.id ~ '/comments' %}
+{# The author's own page is the profile, and publishing happens on the compose page. #}
+{% set author_url = '/profile' if user and user.id == author.id else '/people/' ~ author.id %}
+{% block title %}{{ post.title or 'Update by ' ~ author.display_name }} | X-Social{% endblock %}
+{% block content %}
+<section class="thread-layout">
+  <a class="back-link" href="{{ author_url }}">← {{ author.display_name }}</a>
+  {% if error == 'slow-down' %}<p class="alert" role="alert">You’re replying too quickly. Try again in a moment.</p>{% endif %}
+  {% if error == 'invalid-comment' %}<p class="alert" role="alert">Comments must contain 1–5,000 characters.</p>{% endif %}
+
+  {% call show_post_card(post, author, none, author_url) %}
+    <div class="thread-actions">
+      {% if user and not post.removed_at and user.id == post.author_id %}
+        <form method="post" action="/posts/{{ post.id }}/remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="text-button danger-button" type="submit">Remove update</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endcall %}
+
+  {# Everyone who can read a personal update is in its audience, so anyone reading this
+     page may reply. Reports stay community-scoped: there is no moderator for a page the
+     author owns, and the audience is limited to people who chose to follow them. #}
+  {% if user and post.removed_at %}
+    {% set notice = ('locked-notice', 'This update was removed. New replies are closed.') %}
+  {% else %}
+    {% set notice = none %}
+  {% endif %}
+  {{ show_comments(post, user, comments, csrf_token, comments_base, user and not post.removed_at, user and user.id == post.author_id, '', [], notice) }}
+</section>
+{% endblock %}

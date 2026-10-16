@@ -4,7 +4,11 @@ Soccom is a finite social communication platform. Phases 1–6 of [implementatio
 
 ## Stack decisions
 
-- Web: FastAPI, Jinja2, and HTMX. HTMX enhances the profile save; standard forms remain functional without JavaScript. Alpine.js is intentionally not included until a real client-side interaction needs it.
+- Web: FastAPI, Jinja2, and HTMX. HTMX enhances the profile save; standard forms remain functional without JavaScript. Because a boosted link or form can only replace the piece of the page it was pointed at, never the shell around it, a redirect on an HTMX request is answered with an `HX-Redirect` header instead — so an expired session sends the browser to the sign-in page rather than swapping it into a page the old session rendered. Alpine.js is intentionally not included until a real client-side interaction needs it.
+- UI shell: every page renders inside one base template — a sticky top bar, a left rail of destinations, and a centered column of cards — with the mobile tab bar taking over below 761px. The top bar's avatar is an account menu: a native `<details>` disclosure that opens Profile, Settings, and a log-out form, so it needs no JavaScript to open or to submit. It opts out of the header's `hx-boost`, because these are account navigations that replace the whole shell — logging out would otherwise swap only `#main-content` and leave the rail and the open menu on screen. The stylesheet keeps the existing palette; the layout is what is feed-first, since the dashboard still names its count, window end, and completion. Type is loaded over Inter's light 300–450 axis and the sheet uses three weights only — 400 for body text, 425 for navigation, buttons, and labels, 450 for headings, names, and badges — so hierarchy comes from size and colour rather than weight.
+- Landing page: `/dashboard` is where a signed-in visitor lands (login, registration, and `/` all redirect there). It carries both halves of the finite window: a "New post" entry that opens the compose view, and the batch of posts from followed people and joined communities. `/updates` is a permanent redirect to it, so saved links and in-flight cursors keep working. Chat moved to `/conversations`, one click away behind the rail.
+- Post view: one view renders both kinds of post — a personal update and a community post — so `/posts/{id}` and `/communities/{slug}/posts/{id}` differ only in the byline, the wording of a removal, and the actions the reader may take. `templates/partials/post_view.html` holds the card and `templates/partials/comments_section.html` holds the composer and thread; each route keeps its own visibility rules.
+- Workspace: `/workspace` is the one place the reader sees and manages everything they published — personal updates and community posts in a single filterable list, each row carrying the author's own withdraw action and, for a personal update, the control that changes who may read it. It is a keyset window (50 per page, "showing N of M", never an unbounded dump) and it keeps a row for a post whose community the reader has left, without a link, because that community page answers 404 to a non-member. The profile page carries identity and the account fields and links here rather than listing posts.
 - Mobile: Flutter is deferred until the web MVP is validated. Keep product rules in backend services; add a versioned JSON API before a mobile client is built.
 - Persistence: PostgreSQL with explicit Alembic migrations. The application never creates production tables at startup.
 - Identity: opaque server-managed session tokens, stored only as SHA-256 digests; cookies are HttpOnly, SameSite=Lax, and Secure in production. Forms use session-bound CSRF tokens.
@@ -13,7 +17,7 @@ Soccom is a finite social communication platform. Phases 1–6 of [implementatio
 - Relationships: follows and blocks are unique directed edges. A block prevents follows in either direction and removes follows already present between the two accounts.
 - Communities: public communities are discoverable and joinable by signed-in users. Private communities do not appear in discovery and return a non-revealing 404 to non-members; owners and moderators can invite users by username. Owners alone can grant or revoke moderator roles; moderators can remove ordinary members. Administrative changes are audited.
 - Discussions: community members can create bounded text posts and threaded comments. Post reads respect community privacy and block relationships. Authors can remove their own content; owners/moderators can remove content, lock discussions, review reports, and leave moderation events. Exact duplicate posts and rapid posting are rate-limited.
-- Chat: the signed-in destination is the inbox, with persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Presence, calls, media, and end-to-end encryption are not in the current build.
+- Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Presence, calls, media, and end-to-end encryption are not in the current build.
 
 ## Backend layout
 
@@ -41,14 +45,21 @@ backend/app/
 ├── schemas/                # Pydantic contracts for the JSON endpoints
 ├── services/               # authorization, communities, content helpers, messaging,
 │                           # notifications, updates, audit, outbox, idempotency
-├── templates/              # Jinja2 templates
-└── static/                 # stylesheet and the chat client
+├── templates/              # Jinja2 templates, grouped the way api/routes/ is
+│   ├── base.html           # the shell every page extends
+│   ├── partials/           # macros and fragments shared across pages
+│   ├── auth/ account/ chat/ communities/ people/ posts/
+│   └── home.html dashboard.html notifications.html
+└── static/
+    ├── css/styles.css      # one stylesheet, opened by its palette tokens
+    └── js/chat.js          # the chat client
 ```
 
 Rules of thumb:
 
 - Route modules handle transport concerns (validation, forms, redirects) and delegate visibility, membership, and notification rules to `services/`.
 - `services/` never imports `api/`, and `models/` imports neither. Request plumbing stays in `api/` so domain rules stay testable without HTTP.
+- Templates are named after the route that renders them and live under their domain: `communities/detail.html`, `posts/new.html`. Anything two pages share goes in `templates/partials/` as a macro — `page_heading`, `post_compose`, `auth_layout`, `post_view`, `comments_section`, `comment_tree` — so a heading or a composer changes in one place.
 - `app.main:app` stays the single ASGI entry point; a new domain is a new `api/routes/<domain>.py` router added to `api/router.py`, plus its model and service modules.
 
 ## Local setup (Windows PowerShell)
@@ -133,7 +144,7 @@ Create the `soccom_test` database once against the Compose PostgreSQL instance b
 - `GET /readyz` is readiness: it runs `SELECT 1` and answers `503 {"status": "unavailable"}` when the database is unreachable, so traffic can be drained without killing the process.
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.
-- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, and the configured object-storage origin that browsers upload attachments to) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one.
+- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, and the configured object-storage origin that browsers upload attachments to) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses.
 - `GET /metrics` exposes `soccom_http_requests_total`, `soccom_http_request_duration_seconds`, `soccom_uptime_seconds`, `soccom_db_pool_connections`, `soccom_outbox_unpublished_events`, and `soccom_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
 - `ops/` holds the beta evidence and procedures. `alerts.yml` carries rules for error rate, latency, pool saturation, stuck idempotency keys, outbox backlog, and restore-rehearsal staleness; `runbooks.md` says what to do for each and lists the owners this phase still needs; `rehearse-restore.ps1` dumps the database, restores it into a scratch database, and compares every table's row count and the migration revision; `loadtest.py` measures p95 latency and error rate against documented budgets.
 - Accessibility is asserted rather than assumed: `backend/tests/test_accessibility.py` parses every rendered page and fails on a missing document language, an unlabelled control, an image without `alt`, a button with no accessible name, or a positive `tabindex`.
@@ -145,7 +156,7 @@ The integration hooks that keep the commercial phases from reworking the social 
 - **Event vocabulary.** `core/events.py` owns every `domain.action` name, including the commercial names reserved for later phases. Audit rows and outbox rows validate against it, so a typo fails at the write site instead of storing an event nothing can read.
 - **Platform audit log.** `platform_audit_events` is append-only and records action, scope, actor, target, before/after state, reason, and request id. Community and moderation actions write it alongside their existing typed rows through `services/communities.py`, conversation membership changes through `services/messaging.py`, and account deletion and ownership transfer through `routes/account.py`. `scope_id` and `target_id` carry no foreign key on purpose: an audit row outlives the actor or target it describes. The one exception is retention rather than integrity — removing a tenant (a community with no active member left) removes its scoped rows and leaves a platform-scoped `community.deleted` record.
 - **Transactional outbox.** `services/outbox.py` writes an event in the same transaction as its state change and never commits by itself, so an event cannot exist without the change it announces. Nothing publishes yet: `published_at` stays NULL until a durable publisher and its pruning jobs arrive.
-- **Idempotency keys.** Send `Idempotency-Key: <8-128 characters of A-Za-z0-9._:->` on a mutating request, or the same value in an `idempotency_key` form field. A retry that reuses a key with the same content replays the stored response instead of repeating the change; the same key with different content answers `409`; a malformed key answers `400`; keys are scoped per account, so another account's key neither blocks nor reveals anything. Keys are recorded but not expired yet — pruning arrives with the outbox publisher. The chat client presents one per message (`static/chat.js`); the remaining mutating endpoints adopt them as their clients gain retry behavior.
+- **Idempotency keys.** Send `Idempotency-Key: <8-128 characters of A-Za-z0-9._:->` on a mutating request, or the same value in an `idempotency_key` form field. A retry that reuses a key with the same content replays the stored response instead of repeating the change; the same key with different content answers `409`; a malformed key answers `400`; keys are scoped per account, so another account's key neither blocks nor reveals anything. Keys are recorded but not expired yet — pruning arrives with the outbox publisher. The chat client presents one per message (`static/js/chat.js`); the remaining mutating endpoints adopt them as their clients gain retry behavior.
 - **Scope predicates.** `core/scoping.py` gives every scope-carrying table one `(scope_type, scope_id)` predicate, `scoped_select`/`scoped_get` for reads, and `ScopeViolation` for a mismatch, which `api/middleware.py` answers with the same non-revealing 404 as a missing row. `business` is reserved for Phase 11, and `platform` covers records that must outlive a tenant.
 
 Ids in audit and outbox payloads are strings, and a payload carries only what a consumer needs to act on: the report reason, for example, stays in `content_reports`, where account deletion can redact it.
@@ -203,25 +214,59 @@ A post belongs to a community or to an account. The second shape arrived in migr
 states both shapes in `ck_post_shape`, so a community post is titled and a personal update is
 text with an optional title.
 
-Publishing happens on `/profile` ("Your updates"), which also lists what the author has
-published. A personal update then appears in three places:
+Publishing happens on `/posts/new`, the compose view the dashboard's "New post" entry and the
+workspace both open; publishing lands on the new post's own view. A personal update then
+appears in four places:
 
-- `/posts/{id}` — the thread, with the same comment tree the community thread uses
-  (`templates/partials/comment_tree.html` renders both).
-- `/people/{id}` — the author's page in the directory, where followers read the list.
-- `/updates` — the `people` source, which is exactly the list of accounts the reader follows;
-  the `communities` source therefore never includes a personal update.
+- `/posts/{id}` — the post view: the post card plus its comment thread, the same view a
+  community post opens in (`templates/partials/post_view.html` and
+  `templates/partials/comments_section.html` render both kinds, and
+  `templates/partials/comment_tree.html` renders the replies).
+- `/people/{id}` — the author's page in the directory. For an author the reader does not
+  follow it is also the discovery path for an update shared with everyone, and it narrows to
+  the same rows the post view would open.
+- `/dashboard` — the `people` source, which is exactly the list of accounts the reader follows
+  plus the reader's own posts, so a post published from the landing page reads back there; the
+  `communities` source therefore never includes a personal update. The list is narrowed by the
+  audience rule, so a follower's window never includes someone else's `only me` update.
+- `/workspace` — the author's own list, where the row carries the withdraw action and the
+  control that changes the audience afterwards.
 
-The audience is the author and their followers, and every refusal is the same non-revealing
-404 a missing post returns (`find_personal_post`). Removing an update leaves the author a
-tombstone and hides it from everyone else.
+Every refusal is the same non-revealing 404 a missing post returns (`find_personal_post`).
+Removing an update leaves the author a tombstone and hides it from everyone else.
+
+### Who can see an update
+
+Migration `0013_post_audience` added `posts.audience`, one value of `AUDIENCES`
+(`app/models/content.py`), chosen on the compose view and changeable later from the workspace:
+
+- `followers` — the author and their followers, read in the followers' dashboard window and on
+  the author's page under People. It is also the column default, so an update written before
+  `0013` keeps the audience it always had.
+- `only_me` — the author alone. It stays out of every follower's window, dashboard included.
+- `everyone` — any signed-in account, follower or not. This is not a firehose: the dashboard is
+  still the accounts the reader follows, so the choice widens who may read a post the reader
+  reached on purpose instead of broadcasting it.
+
+`can_read_personal_post` (`app/services/authorization.py`) is the one read rule and
+`visible_personal_posts_condition` is that same rule as a SQL predicate, so a list query and a
+single-row read cannot drift apart. A block stays absolute and hides an `everyone` update just
+as it hides a `followers` one. A community post always carries `followers`, because a
+community post's audience is its community, and `ck_post_audience_scope` states that in the
+schema.
+
+Changing the audience is `POST /posts/{post_id}/audience`: the author alone, a 403 to a reader
+who can see the post but did not write it, a 422 for a value outside `AUDIENCES`, and the
+non-revealing 404 for anyone the read rule already keeps out. The change is journalled as
+`post.audience.changed`, because who may read an update is a privacy boundary even though the
+row only records the value it now holds.
 
 Three boundaries are deliberate:
 
 - **No reporting or moderation.** `content_reports` is community-scoped and a moderator role
   belongs to a community, so a page the author owns has no queue to report into. A personal
-  update is readable only by people who chose to follow its author. A platform-level report
-  path is a product decision that is not made yet, not an oversight to patch locally.
+  update is readable only by the people its author's audience choice names. A platform-level
+  report path is a product decision that is not made yet, not an oversight to patch locally.
 - **No lock.** Locking exists for moderators, and there is none on a personal page; the author
   removes an update instead. The author can also remove a comment they did not write, because
   the thread is theirs.

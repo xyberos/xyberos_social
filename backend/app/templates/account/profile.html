@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Your profile | X-Social{% endblock %}
+{% block content %}
+<section class="profile-layout">
+  {{ page_heading('Account / Profile', 'Your corner of X-Social.', 'Keep the details that help your people recognize you.') }}
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if request.query_params.get('saved') %}<p class="success" role="status">Profile saved.</p>{% endif %}
+
+  <form method="post" action="/profile" class="profile-form" hx-post="/profile" hx-target="#profile-result" hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="profile-id">
+      <div class="avatar" aria-hidden="true">{{ user.display_name[:1]|upper }}</div>
+      <div><strong>{{ user.display_name }}</strong><span>@{{ user.username }}</span></div>
+    </div>
+    <label>Email address<input type="email" value="{{ user.email }}" disabled><small>Email changes are not available yet.</small></label>
+    <label>Display name<input name="display_name" value="{{ user.display_name }}" maxlength="80" required></label>
+    <label>Bio<textarea name="bio" rows="4" maxlength="280">{{ user.bio }}</textarea><small>Up to 280 characters.</small></label>
+    <div class="profile-actions">
+      <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save profile</button>
+      <span id="profile-result" aria-live="polite"></span>
+    </div>
+  </form>
+  <div class="profile-actions profile-settings-link">
+    <a class="button button-quiet" href="/workspace"><span class="material-symbols-rounded" aria-hidden="true">article</span>Your workspace</a>
+    <a class="button button-quiet" href="/settings"><span class="material-symbols-rounded" aria-hidden="true">settings</span>Settings</a>
+  </div>
+  <form method="post" action="/logout" class="logout-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Log out</button>
+  </form>
+</section>
+{% endblock %}

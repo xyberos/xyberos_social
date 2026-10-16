@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ community.name }} | Soccom{% endblock %}
+{% block title %}{{ community.name }} | X-Social{% endblock %}
 {% block content %}
 <section class="community-layout">
   <a class="back-link" href="/communities">← All communities</a>
@@ -55,12 +55,21 @@
     <div class="post-list">
       {% for post, author in posts %}
         <article class="post-row">
+          <div class="post-head">
+            <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
+            <div class="post-byline">
+              <span class="post-author">{{ author.display_name }}</span>
+              <p class="post-meta">@{{ author.username }}<span>{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</span>{% if post.is_locked %}<span class="locked-label">Locked</span>{% endif %}</p>
+            </div>
+          </div>
           <h3><a href="/communities/{{ community.slug }}/posts/{{ post.id }}">{{ post.title }}</a></h3>
-          <p class="post-meta">@{{ author.username }} · {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}{% if post.is_locked %} · locked{% endif %}</p>
           {% if post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
+          <div class="post-actions">
+            <a class="post-action" href="/communities/{{ community.slug }}/posts/{{ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Open discussion</a>
+          </div>
         </article>
       {% else %}
-        <p class="updates-empty">No discussions yet.</p>
+        <p class="empty-card">No discussions yet.</p>
       {% endfor %}
     </div>
   </section>
