@@ -1,7 +1,7 @@
 # Pinned so the stack keeps one identity when the project directory is renamed. Compose
 # otherwise derives the project name from the directory, which starts a second stack with a
 # fresh empty volume, leaves the running one unmanageable, and collides on published ports.
-name: soccom
+name: social+
 
 services:
   app:
@@ -11,22 +11,22 @@ services:
       # Compose service names resolve inside the Compose network, so the container reaches
       # PostgreSQL and Mailpit by service name rather than through the host port.
       APP_ENV: development
-      DATABASE_URL: postgresql+psycopg://soccom:soccom@postgres:5432/soccom
+      DATABASE_URL: postgresql+psycopg://social+:social+@postgres:5432/social+
       APP_BASE_URL: http://localhost:8010
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
-      SMTP_FROM: accounts@soccom.local
+      SMTP_FROM: accounts@social+.local
       # Compose service names resolve inside the Compose network. Attachment bytes go to the
       # S3-compatible service below, never into PostgreSQL.
       S3_ENDPOINT_URL: http://object-storage:5000
-      S3_BUCKET: soccom-attachments
+      S3_BUCKET: social-attachments
       S3_REGION: us-east-1
       S3_USE_PATH_STYLE: "true"
       # Local development credentials: the Compose object-storage service accepts any values
       # but still requires a signed request. A deployment leaves these out and authenticates
       # through boto3's own chain instead.
-      S3_ACCESS_KEY_ID: soccom-local
-      S3_SECRET_ACCESS_KEY: soccom-local-dev
+      S3_ACCESS_KEY_ID: social-local
+      S3_SECRET_ACCESS_KEY: social-local-dev
       # Set these when the optional scanning profile is running, otherwise uploads are
       # validated structurally and no malware scan is attempted:
       #   docker compose --profile scanning up -d
@@ -46,15 +46,15 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: soccom
-      POSTGRES_USER: soccom
-      POSTGRES_PASSWORD: soccom
+      POSTGRES_DB: social+
+      POSTGRES_USER: social+
+      POSTGRES_PASSWORD: social+
     ports:
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U soccom -d soccom"]
+      test: ["CMD-SHELL", "pg_isready -U social+ -d social+"]
       interval: 5s
       timeout: 3s
       retries: 10

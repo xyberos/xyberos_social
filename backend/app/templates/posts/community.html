@@ -2,7 +2,7 @@
 {% from "partials/post_view.html" import show_post_card %}
 {% from "partials/comments_section.html" import show_comments %}
 {% set comments_base = '/communities/' ~ community.slug ~ '/posts/' ~ post.id ~ '/comments' %}
-{% block title %}{{ post.title }} | {{ community.name }} | X-Social{% endblock %}
+{% block title %}{{ post.title }} | {{ community.name }} | Social+{% endblock %}
 {% block content %}
 <section class="thread-layout">
   <a class="back-link" href="/communities/{{ community.slug }}">← {{ community.name }}</a>

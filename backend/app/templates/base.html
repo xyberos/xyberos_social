@@ -8,7 +8,7 @@
          forbids and which this app does not use: no template renders a .htmx-indicator. -->
     <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
 
-    <title>{% block title %}X-Social | Communication, on your terms.{% endblock %}</title>
+    <title>{% block title %}Social+ | Communication, on your terms.{% endblock %}</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,7 +30,7 @@
       <!-- Added hx-boost to AJAX-ify all navigation links inside the header instantly -->
       <header class="topbar" hx-boost="true" hx-target="#main-content" hx-select="#main-content">
         <div class="topbar-inner">
-          <a class="wordmark" href="/" aria-label="X-Social home">x-social<span>.</span></a>
+          <a class="wordmark" href="/" aria-label="Social+ home">social+</a>
 
           {% if user is defined and user %}
             <nav class="topbar-actions" aria-label="Main navigation">

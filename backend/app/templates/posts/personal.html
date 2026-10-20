@@ -4,7 +4,7 @@
 {% set comments_base = '/posts/' ~ post.id ~ '/comments' %}
 {# The author's own page is the profile, and publishing happens on the compose page. #}
 {% set author_url = '/profile' if user and user.id == author.id else '/people/' ~ author.id %}
-{% block title %}{{ post.title or 'Update by ' ~ author.display_name }} | X-Social{% endblock %}
+{% block title %}{{ post.title or 'Update by ' ~ author.display_name }} | Social+{% endblock %}
 {% block content %}
 <section class="thread-layout">
   <a class="back-link" href="{{ author_url }}">← {{ author.display_name }}</a>
