@@ -12,7 +12,7 @@ services:
       # PostgreSQL and Mailpit by service name rather than through the host port.
       APP_ENV: development
       DATABASE_URL: postgresql+psycopg://social+:social+@postgres:5432/social+
-      APP_BASE_URL: http://localhost:8010
+      APP_BASE_URL: http://localhost:8000
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       SMTP_FROM: accounts@social+.local
@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: social+
       POSTGRES_USER: social+

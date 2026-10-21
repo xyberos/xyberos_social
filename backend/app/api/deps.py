@@ -78,7 +78,12 @@ def authenticated_user(request: Request, database: Session) -> User | None:
     if browser_session is None or browser_session.user_id is None:
         return None
     user = database.get(User, browser_session.user_id)
-    return user if user and user.is_active else None
+    if not (user and user.is_active):
+        return None
+    # The rendered shell reports unread chat messages, and it must read the session that
+    # belongs to this request rather than open a second connection.
+    request.state.database = database
+    return user
 
 
 def require_csrf(request: Request, browser_session: UserSession, token: str) -> None:

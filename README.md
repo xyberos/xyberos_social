@@ -1,6 +1,6 @@
-# Soccom
+# Social+
 
-Soccom is a finite social communication platform. Phases 1–6 of [implementation_plan.md](implementation_plan.md) are implemented: account identity, relationships, communities, threaded discussions, moderation, an inbox-first chat experience, finite update windows, and notification/account-data settings. The same plan schedules file/media attachments and audio/video calling as Phases 8–9, and the commercial, trust, and Xyberos work as Phases 10–17. The pre-commercial bridge work those phases depend on is also landed: one `domain.action` event vocabulary, an append-only platform audit log, a transactional outbox, per-actor idempotency keys, and scope predicates that fail closed.
+Social+ is a finite social communication platform. Phases 1–6 of [implementation_plan.md](implementation_plan.md) are implemented: account identity, relationships, communities, threaded discussions, moderation, an inbox-first chat experience, finite update windows, and notification/account-data settings. The same plan schedules file/media attachments and audio/video calling as Phases 8–9, and the commercial, trust, and Xyberos work as Phases 10–17. The pre-commercial bridge work those phases depend on is also landed: one `domain.action` event vocabulary, an append-only platform audit log, a transactional outbox, per-actor idempotency keys, and scope predicates that fail closed.
 
 ## Stack decisions
 
@@ -17,7 +17,7 @@ Soccom is a finite social communication platform. Phases 1–6 of [implementatio
 - Relationships: follows and blocks are unique directed edges. A block prevents follows in either direction and removes follows already present between the two accounts.
 - Communities: public communities are discoverable and joinable by signed-in users. Private communities do not appear in discovery and return a non-revealing 404 to non-members; owners and moderators can invite users by username. Owners alone can grant or revoke moderator roles; moderators can remove ordinary members. Administrative changes are audited.
 - Discussions: community members can create bounded text posts and threaded comments. Post reads respect community privacy and block relationships. Authors can remove their own content; owners/moderators can remove content, lock discussions, review reports, and leave moderation events. Exact duplicate posts and rapid posting are rate-limited.
-- Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Presence, calls, media, and end-to-end encryption are not in the current build.
+- Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. A conversation opens on its first unread message — the newest one when nothing is unread — and follows arriving messages only while the reader is already at the end, so scrolling back is never interrupted. Every signed-in page also holds `/ws/inbox`, which carries only the reader's own unread total so the Chat badge updates without a reload. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Presence, calls, media, and end-to-end encryption are not in the current build.
 
 ## Backend layout
 
@@ -52,7 +52,9 @@ backend/app/
 │   └── home.html dashboard.html notifications.html
 └── static/
     ├── css/styles.css      # one stylesheet, opened by its palette tokens
-    └── js/chat.js          # the chat client
+    └── js/
+        ├── shell.js        # the shell socket and its live unread badge
+        └── chat.js         # the chat client
 ```
 
 Rules of thumb:
@@ -144,7 +146,7 @@ Create the `soccom_test` database once against the Compose PostgreSQL instance b
 - `GET /readyz` is readiness: it runs `SELECT 1` and answers `503 {"status": "unavailable"}` when the database is unreachable, so traffic can be drained without killing the process.
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.
-- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, and the configured object-storage origin that browsers upload attachments to) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses.
+- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, the configured object-storage origin that browsers upload attachments to, and `blob:` images for an attachment the reader already received) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses.
 - `GET /metrics` exposes `soccom_http_requests_total`, `soccom_http_request_duration_seconds`, `soccom_uptime_seconds`, `soccom_db_pool_connections`, `soccom_outbox_unpublished_events`, and `soccom_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
 - `ops/` holds the beta evidence and procedures. `alerts.yml` carries rules for error rate, latency, pool saturation, stuck idempotency keys, outbox backlog, and restore-rehearsal staleness; `runbooks.md` says what to do for each and lists the owners this phase still needs; `rehearse-restore.ps1` dumps the database, restores it into a scratch database, and compares every table's row count and the migration revision; `loadtest.py` measures p95 latency and error rate against documented budgets.
 - Accessibility is asserted rather than assumed: `backend/tests/test_accessibility.py` parses every rendered page and fails on a missing document language, an unlabelled control, an image without `alt`, a button with no accessible name, or a positive `tabindex`.
@@ -185,6 +187,25 @@ The flow has three steps, and each enforces its own rule:
    upload, and an unauthorized reader all answer the same non-revealing 404. Allowlisted images
    may render inline under `default-src 'none'; sandbox`; everything else is sent as a
    `Content-Disposition: attachment` download. No bucket is public and no URL is permanent.
+
+There is one stored copy of an attachment. Delivery is confirmed by the reader's page, not by
+the download alone: once the browser has the bytes stored locally it posts
+`POST /attachments/{id}/received`, which records the reader in `attachment_deliveries`
+(migration `0015_attachment_deliveries`). When every other participant in the conversation has
+a row there, the object is removed from storage. The row stays behind as a tombstone, so the
+transcript still names the file and says `Attachment expired` rather than losing the slot, and
+the account's quota is released. A reader that fetched the bytes but could not keep them — no
+storage, a private window — never confirms, so the file survives for everyone else. The owner's
+own confirmation is not a delivery: there is nothing to release until the people it was sent to
+have it.
+
+Because the server copy is gone, the reader's browser keeps its own copy in IndexedDB, keyed by
+account so a second sign-in on the same machine cannot read it. Images are fetched once through
+`static/js/chat.js` and rendered from that local blob, which is why an expired bubble still
+opens for the person who received it. A web page cannot link to a file saved in someone's
+Downloads folder — a `file:///` navigation is blocked from an `https` page and the save path is
+never exposed — so this local copy is the closest the application can get. Anyone without that
+copy, including the sender, sees the tombstone.
 
 Each transition is durable, so a scanner outage leaves an upload in `pending_scan` and tells the
 client to retry instead of promoting unverified bytes. Abandoned uploads are reaped when the

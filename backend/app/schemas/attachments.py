@@ -30,4 +30,5 @@ class AttachmentPayload(BaseModel):
     content_type: str
     size_bytes: int
     inline: bool
+    expired: bool = False
     download_url: str

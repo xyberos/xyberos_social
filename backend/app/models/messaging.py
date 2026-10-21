@@ -66,7 +66,7 @@ class ConversationMember(Base):
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
     __table_args__ = (
-        CheckConstraint("length(trim(body)) BETWEEN 1 AND 5000", name="ck_message_body_length"),
+        CheckConstraint("length(trim(body)) <= 5000", name="ck_message_body_length"),
         Index("ix_conversation_messages_order", "conversation_id", "created_at", "id"),
     )
 

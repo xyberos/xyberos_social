@@ -12,12 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    database_url: str = "postgresql+psycopg://soccom:soccom@localhost:5433/soccom"
+    database_url: str = "postgresql+psycopg://social+:social+@localhost:5433/social+"
     cookie_secure: bool = False
     app_base_url: str = "http://localhost:8000"
     smtp_host: str | None = None
     smtp_port: int = 1025
-    smtp_from: str = "accounts@soccom.local"
+    smtp_from: str = "accounts@social.local"
     smtp_starttls: bool = False
     smtp_username: str | None = None
     smtp_password: str | None = None
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # chain (instance role, AWS_ACCESS_KEY_ID, ~/.aws/credentials) instead.
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
-    s3_bucket: str = "soccom-attachments"
+    s3_bucket: str = "social-attachments"
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
     s3_use_path_style: bool = True

@@ -29,12 +29,37 @@ from app.services.messaging import (
     active_conversation_member,
     conversation_sockets,
     direct_conversation_key,
+    first_unread_message,
     message_payload,
     record_conversation_event,
+    shell_sockets,
+    unread_message_total,
 )
 from app.services.outbox import enqueue_event
 
 router = APIRouter()
+
+
+async def publish_unread_totals(
+    database: Session, conversation_id: UUID, *, exclude_user_id: UUID | None = None
+) -> None:
+    """Send every participant their own total, so a badge is never a client-side guess."""
+    recipient_ids = database.scalars(
+        select(ConversationMember.user_id).where(
+            ConversationMember.conversation_id == conversation_id,
+            ConversationMember.left_at.is_(None),
+        )
+    ).all()
+    for recipient_id in recipient_ids:
+        if recipient_id == exclude_user_id:
+            continue
+        await shell_sockets.send(
+            recipient_id,
+            {
+                "type": "chat_unread",
+                "total": unread_message_total(database, user_id=recipient_id),
+            },
+        )
 
 
 @router.get("/conversations", response_class=HTMLResponse)
@@ -341,6 +366,11 @@ def conversation_detail(
     peer_read_at = None
     if conversation.kind == "direct" and peer:
         peer_read_at = peer["membership"].last_read_at
+    # Where the reading pane opens: the oldest message this visit has not seen yet. Taken
+    # before the mark below moves, so it reflects what was unread when the page was asked for.
+    unread_marker = first_unread_message(
+        message_rows, user_id=user.id, read_at=membership.last_read_at
+    )
     events = database.scalars(
         select(ConversationEvent)
         .where(ConversationEvent.conversation_id == conversation.id)
@@ -364,6 +394,12 @@ def conversation_detail(
             "message_attachments": message_attachments,
             "has_older": has_older,
             "older_cursor": message_rows[0].id if has_older and message_rows else None,
+            "first_unread_id": unread_marker.id if unread_marker else None,
+            # Loading earlier messages keeps the pane at the boundary between the two windows
+            # instead of jumping to the newest message.
+            "anchor_message_id": (
+                message_rows[-1].id if before is not None and message_rows else None
+            ),
             "peer_read_at": peer_read_at,
             "events": events,
             "csrf_token": browser_session.csrf_token,
@@ -545,7 +581,7 @@ def mark_conversation_read(
 async def send_conversation_message(
     conversation_id: UUID,
     request: Request,
-    body: str = Form(),
+    body: str = Form(default=""),
     csrf_token: str = Form(),
     idempotency_key: str | None = Form(default=None),
     attachment_ids: list[UUID] = Form(default=[]),
@@ -571,8 +607,11 @@ async def send_conversation_message(
                 status_code=403, detail="Direct messaging is blocked between these accounts."
             )
     body = body.strip()
-    if not body or len(body) > 5000:
-        raise HTTPException(status_code=422, detail="Message must contain 1–5,000 characters.")
+    if len(body) > 5000 or (not body and not attachment_ids):
+        raise HTTPException(
+            status_code=422,
+            detail="A message needs text or an attachment (up to 5,000 characters of text).",
+        )
     if not check_rate_limit(str(user.id), f"message:{conversation.id}", limit=60, seconds=60):
         raise HTTPException(status_code=429, detail="You are sending messages too quickly.")
     key = idempotency.presented_key(request, idempotency_key)
@@ -632,9 +671,44 @@ async def send_conversation_message(
         conversation.id,
         {"type": "message", "message": payload},
     )
+    await publish_unread_totals(database, conversation.id, exclude_user_id=user.id)
     if request.headers.get("X-Chat-Request") == "true":
         return JSONResponse(payload)
     return RedirectResponse(f"/conversations/{conversation.id}", status_code=303)
+
+
+@router.websocket("/ws/inbox")
+async def inbox_websocket(
+    websocket: WebSocket,
+    database: Session = Depends(get_db),
+):
+    """Push each signed-in reader their own unread total, on whatever page they are on."""
+    origin = websocket.headers.get("origin")
+    host = websocket.headers.get("host", "")
+    if origin and origin.split("://", 1)[-1].rstrip("/").lower() != host.lower():
+        await websocket.close(code=4403)
+        return
+    browser_session = current_session(websocket, database)
+    if browser_session is None or browser_session.user_id is None:
+        await websocket.close(code=4401)
+        return
+    user_id = browser_session.user_id
+    await shell_sockets.connect(user_id, websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message == "ping":
+                await websocket.send_text("pong")
+            elif message == "refresh":
+                total = unread_message_total(database, user_id=user_id)
+                # The socket outlives any one request, so end the read transaction instead of
+                # holding its snapshot open for the life of the connection.
+                database.rollback()
+                await websocket.send_json({"type": "chat_unread", "total": total})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        shell_sockets.disconnect(user_id, websocket)
 
 
 @router.websocket("/ws/conversations/{conversation_id}")

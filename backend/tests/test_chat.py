@@ -1,9 +1,14 @@
 import re
+from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect
 
 from conftest import create_account, csrf_from
+
+from app.models import ConversationMember, ConversationMessage, User
 
 
 def start_direct(client, target_username: str) -> str:
@@ -55,9 +60,18 @@ def test_direct_messages_persist_broadcast_and_respect_blocks(client_factory):
         assert packet["type"] == "message"
         assert packet["message"]["body"] == "Hello from the inbox."
 
+    # The unread signal is the Chat nav badge plus a bold conversation title, not a badge
+    # crowded against the sender in the row.
+    waiting_inbox = bob.get("/conversations")
+    assert 'aria-label="1 unread message">1</span>' in waiting_inbox.text
+    assert "inbox-title-unread" in waiting_inbox.text
+    # The badge follows the reader onto every page the shell renders.
+    assert 'aria-label="1 unread message">1</span>' in bob.get("/dashboard").text
+
     bob_conversation = bob.get(f"/conversations/{conversation_id}")
     assert "Hello from the inbox." in bob_conversation.text
-    assert "unread-count" not in bob.get("/conversations").text
+    # The element stays for the live socket to fill in, but it renders hidden at zero.
+    assert 'aria-label="0 unread messages" hidden' in bob.get("/conversations").text
 
     with pytest.raises(WebSocketDisconnect):
         with outsider.websocket_connect(
@@ -78,6 +92,88 @@ def test_direct_messages_persist_broadcast_and_respect_blocks(client_factory):
     )
     assert blocked_send.status_code == 403
     assert "Earlier messages remain available" in bob.get(f"/conversations/{conversation_id}").text
+
+
+def test_opening_a_conversation_starts_at_the_first_unread_message(
+    client_factory, database_factory
+):
+    alice = client_factory()
+    bob = client_factory()
+    for client, username in [(alice, "alice"), (bob, "bob")]:
+        assert create_account(client, f"{username}@example.com", username).status_code == 303
+
+    conversation_id = start_direct(alice, "bob")
+    detail = alice.get(f"/conversations/{conversation_id}")
+    for body in ("First message", "Second message"):
+        assert (
+            alice.post(
+                f"/conversations/{conversation_id}/messages",
+                data={"csrf_token": csrf_from(detail.text), "body": body},
+                headers={"X-Chat-Request": "true"},
+            ).status_code
+            == 200
+        )
+
+    # Stamp the two messages one minute apart in the past, so the test does not depend on how
+    # precisely the clock stamps them, and mark them both unread.
+    with database_factory() as database:
+        bob_id = database.scalar(select(User.id).where(User.username == "bob"))
+        membership = database.get(ConversationMember, (UUID(conversation_id), bob_id))
+        membership.last_read_at = datetime(2020, 1, 1, 9, 0, tzinfo=UTC)
+        for body, minute in (("First message", 0), ("Second message", 1)):
+            message = database.scalar(
+                select(ConversationMessage).where(ConversationMessage.body == body)
+            )
+            message.created_at = datetime(2020, 1, 1, 10, minute, tzinfo=UTC)
+        database.commit()
+
+    opened = bob.get(f"/conversations/{conversation_id}")
+    assert opened.text.count('data-first-unread="true"') == 1
+    marker = re.search(r'<article[^>]*data-first-unread="true"[^>]*>(.*?)</article>', opened.text, re.S)
+    assert marker is not None
+    assert "First message" in marker.group(1)
+    assert "Second message" not in marker.group(1)
+
+    # Reading the conversation consumes the marker, so the next visit opens at the newest.
+    assert 'data-first-unread="true"' not in bob.get(f"/conversations/{conversation_id}").text
+
+
+def test_the_shell_socket_pushes_each_readers_unread_total(client_factory):
+    alice = client_factory()
+    bob = client_factory()
+    for client, username in [(alice, "alice"), (bob, "bob")]:
+        assert create_account(client, f"{username}@example.com", username).status_code == 303
+
+    conversation_id = start_direct(alice, "bob")
+    detail = alice.get(f"/conversations/{conversation_id}")
+
+    with bob.websocket_connect("/ws/inbox", headers={"origin": "http://testserver"}) as socket:
+        socket.send_text("refresh")
+        assert socket.receive_json() == {"type": "chat_unread", "total": 0}
+
+        assert (
+            alice.post(
+                f"/conversations/{conversation_id}/messages",
+                data={"csrf_token": csrf_from(detail.text), "body": "Live badge"},
+                headers={"X-Chat-Request": "true"},
+            ).status_code
+            == 200
+        )
+        assert socket.receive_json() == {"type": "chat_unread", "total": 1}
+
+        # Reading the conversation elsewhere is reflected on this socket too.
+        bob.get(f"/conversations/{conversation_id}")
+        socket.send_text("refresh")
+        assert socket.receive_json() == {"type": "chat_unread", "total": 0}
+
+
+def test_the_shell_socket_refuses_a_signed_out_reader(client_factory):
+    anonymous = client_factory()
+    with pytest.raises(WebSocketDisconnect):
+        with anonymous.websocket_connect(
+            "/ws/inbox", headers={"origin": "http://testserver"}
+        ) as socket:
+            socket.receive_text()
 
 
 def test_group_conversation_invite_history_and_leave(client_factory):

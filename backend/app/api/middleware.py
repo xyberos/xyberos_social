@@ -42,7 +42,9 @@ def _app_csp(endpoint_url: str | None) -> str:
     return (
         "default-src 'self'; script-src 'self' https://unpkg.com; "
         "style-src 'self' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
+        # blob: lets a delivered attachment render from the reader's own local copy after the
+        # stored object is released.
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; object-src 'none'; "
         # connect-src covers the same-origin chat WebSocket and the attachment upload target.
         f"connect-src {' '.join(connect_sources)}; base-uri 'self'; "
         "frame-ancestors 'none'; form-action 'self'"

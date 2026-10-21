@@ -1,9 +1,11 @@
 """Conversation membership, message payloads, and the in-process WebSocket fan-out hub."""
 
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from app.core.scoping import conversation_scope
 from app.models import Attachment, ConversationEvent, ConversationMember, ConversationMessage, User
@@ -47,6 +49,37 @@ class ConversationSocketHub:
 
 
 conversation_sockets = ConversationSocketHub()
+
+
+class ShellSocketHub:
+    """One socket per signed-in page, so the shell badge follows the reader everywhere.
+
+    Conversation sockets carry message content for the open transcript; this hub carries only
+    the reader's own unread total, which every page can show.
+    """
+
+    def __init__(self):
+        self.connections: dict[UUID, list[WebSocket]] = {}
+
+    async def connect(self, user_id: UUID, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.connections.setdefault(user_id, []).append(websocket)
+
+    def disconnect(self, user_id: UUID, websocket: WebSocket) -> None:
+        active = self.connections.get(user_id, [])
+        self.connections[user_id] = [socket for socket in active if socket is not websocket]
+        if not self.connections[user_id]:
+            self.connections.pop(user_id, None)
+
+    async def send(self, user_id: UUID, event: dict) -> None:
+        for websocket in list(self.connections.get(user_id, [])):
+            try:
+                await websocket.send_json(event)
+            except (WebSocketDisconnect, RuntimeError):
+                self.disconnect(user_id, websocket)
+
+
+shell_sockets = ShellSocketHub()
 
 
 def active_conversation_member(
@@ -113,6 +146,54 @@ def record_conversation_event(
 def direct_conversation_key(first_user_id: UUID, second_user_id: UUID) -> str:
     pair = sorted((str(first_user_id), str(second_user_id)))
     return sha256(":".join(pair).encode("utf-8")).hexdigest()
+
+
+def _as_utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def first_unread_message(
+    messages: list[ConversationMessage], *, user_id: UUID, read_at: datetime | None
+) -> ConversationMessage | None:
+    """The oldest message in `messages` the reader has not seen yet.
+
+    Same rule as `unread_message_total`: someone else's message, written after the reader's
+    own mark. The chat page opens on this message so a long conversation starts where the
+    reading actually resumes.
+    """
+    for message in messages:
+        if message.sender_id == user_id:
+            continue
+        if read_at is None or _as_utc(message.created_at) > _as_utc(read_at):
+            return message
+    return None
+
+
+def unread_message_total(database: Session, *, user_id: UUID) -> int:
+    """Every message waiting in a conversation the reader still belongs to.
+
+    The inbox uses the same rule per row (another sender, after the reader's own mark), so the
+    shell badge and the bold conversation titles can never disagree.
+    """
+    statement = (
+        select(func.count(ConversationMessage.id))
+        .join(
+            ConversationMember,
+            and_(
+                ConversationMember.conversation_id == ConversationMessage.conversation_id,
+                ConversationMember.user_id == user_id,
+                ConversationMember.left_at.is_(None),
+            ),
+        )
+        .where(
+            ConversationMessage.sender_id != user_id,
+            or_(
+                ConversationMember.last_read_at.is_(None),
+                ConversationMessage.created_at > ConversationMember.last_read_at,
+            ),
+        )
+    )
+    return database.scalar(statement) or 0
 
 
 def message_payload(

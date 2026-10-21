@@ -1,4 +1,4 @@
-"""The attachment pipeline's security and lifecycle guarantees.
+﻿"""The attachment pipeline's security and lifecycle guarantees.
 
 These tests exist for the promises Phase 8 makes: only authorized readers can download, an
 unverified or rejected upload is never downloadable, a declared type that disagrees with the
@@ -219,6 +219,144 @@ def test_only_participants_can_download(client_factory, storage, scanner):
     assert outsider.get("/attachments/00000000-0000-0000-0000-000000000000/download").status_code == 404
 
 
+def acknowledge(client, attachment_id):
+    """What the reader's page posts once it has stored its own copy."""
+    page = client.get("/dashboard")
+    return client.post(
+        f"/attachments/{attachment_id}/received", data={"csrf_token": csrf_from(page.text)}
+    )
+
+
+def test_downloading_alone_does_not_release_the_object(client_factory, storage, scanner):
+    alice, bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+
+    # A reader that could not keep a copy must not cost everyone the file.
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    assert key in storage.objects
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+
+
+def test_the_stored_object_is_released_once_the_recipient_has_it(
+    client_factory, storage, scanner, database_factory
+):
+    alice, bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    confirmed = acknowledge(bob, body["attachment_id"])
+    assert confirmed.status_code == 200
+    assert confirmed.json()["released"] is True
+    assert key not in storage.objects
+
+    with database_factory() as database:
+        attachment = database.get(Attachment, UUID(body["attachment_id"]))
+        assert attachment.deleted_at is not None
+
+    # One copy, and it is gone: even the owner can no longer fetch it.
+    assert alice.get(f"/attachments/{body['attachment_id']}/download").status_code == 404
+
+
+def test_the_owners_own_confirmation_keeps_the_object_for_the_recipient(
+    client_factory, storage, scanner
+):
+    alice, bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+
+    assert alice.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    owner = acknowledge(alice, body["attachment_id"])
+    assert owner.json()["released"] is False
+    assert key in storage.objects
+
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    assert acknowledge(bob, body["attachment_id"]).json()["released"] is True
+    assert key not in storage.objects
+
+
+def test_a_group_releases_the_object_only_after_every_recipient(
+    client_factory, storage, scanner
+):
+    alice = client_factory()
+    bob = client_factory()
+    carol = client_factory()
+    for client, username in [(alice, "alice"), (bob, "bob"), (carol, "carol")]:
+        assert create_account(client, f"{username}@example.com", username).status_code == 303
+
+    new_page = alice.get("/conversations/new")
+    created = alice.post(
+        "/conversations/groups",
+        data={
+            "csrf_token": csrf_from(new_page.text),
+            "title": "Weekend plans",
+            "usernames": "bob, carol",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    conversation_id = created.headers["location"].rsplit("/", 1)[1]
+
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    assert acknowledge(bob, body["attachment_id"]).json()["released"] is False
+    assert key in storage.objects
+
+    assert carol.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    assert acknowledge(carol, body["attachment_id"]).json()["released"] is True
+    assert key not in storage.objects
+
+
+def test_confirmation_requires_a_signed_in_participant(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+
+    outsider = client_factory()
+    assert create_account(outsider, "outsider@example.com", "outsider").status_code == 303
+    anonymous = client_factory()
+
+    assert acknowledge(anonymous, body["attachment_id"]).status_code == 403
+    assert acknowledge(outsider, body["attachment_id"]).status_code == 404
+    assert body["fields"]["key"] in storage.objects
+
+
+def test_an_expired_attachment_keeps_its_place_in_the_transcript(
+    client_factory, storage, scanner
+):
+    alice, bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    detail = alice.get(f"/conversations/{conversation_id}")
+    assert (
+        alice.post(
+            f"/conversations/{conversation_id}/messages",
+            data={
+                "csrf_token": csrf_from(detail.text),
+                "body": "",
+                "attachment_ids": body["attachment_id"],
+            },
+            headers={"X-Chat-Request": "true"},
+        ).status_code
+        == 200
+    )
+
+    assert bob.get(f"/attachments/{body['attachment_id']}/download").status_code == 200
+    assert acknowledge(bob, body["attachment_id"]).status_code == 200
+
+    transcript = bob.get(f"/conversations/{conversation_id}")
+    assert "photo.png" in transcript.text
+    assert "Attachment expired" in transcript.text
+    assert 'data-expired="true"' in transcript.text
+
+
 def test_a_block_hides_an_attachments_download(client_factory, storage, scanner):
     alice, bob, conversation_id = pair(client_factory)
     body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
@@ -424,6 +562,43 @@ def test_an_attachment_can_only_join_its_own_conversation(client_factory, storag
     assert carol_detail.status_code == 200
 
 
+def test_a_message_can_be_an_attachment_without_text(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+
+    detail = alice.get(f"/conversations/{conversation_id}")
+    sent = alice.post(
+        f"/conversations/{conversation_id}/messages",
+        data={
+            "csrf_token": csrf_from(detail.text),
+            "body": "",
+            "attachment_ids": body["attachment_id"],
+        },
+        headers={"X-Chat-Request": "true"},
+    )
+
+    assert sent.status_code == 200
+    assert sent.json()["body"] == ""
+    assert sent.json()["attachments"][0]["filename"] == "photo.png"
+    rendered = alice.get(f"/conversations/{conversation_id}")
+    assert "photo.png" in rendered.text
+    assert "message-bubble" not in rendered.text
+
+    # Neither text nor an attachment is still refused.
+    empty = alice.post(
+        f"/conversations/{conversation_id}/messages",
+        data={
+            "csrf_token": csrf_from(alice.get(f"/conversations/{conversation_id}").text),
+            "body": "",
+        },
+        headers={"X-Chat-Request": "true"},
+    )
+
+    assert empty.status_code == 422
+    assert "text or an attachment" in empty.json()["detail"]
+
+
 def test_deleting_an_account_removes_its_objects(client_factory, storage, scanner):
     alice, _bob, conversation_id = pair(client_factory)
     body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
@@ -491,3 +666,5 @@ def test_download_uses_an_attachment_disposition_for_non_images(client_factory, 
     # A non-inline response is a download, so it runs under the application policy rather
     # than the narrower sandbox policy that inline media gets.
     assert "default-src 'self'" in response.headers["content-security-policy"]
+
+

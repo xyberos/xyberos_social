@@ -31,7 +31,7 @@ from app.core.media import (
 from app.core.scanning import ScanUnavailable, get_scanner
 from app.core.scoping import Scope
 from app.core.storage import StorageError, get_storage
-from app.models import Attachment, ConversationMember, User
+from app.models import Attachment, AttachmentDelivery, ConversationMember, User
 from app.models.attachments import PENDING_SCAN, PENDING_UPLOAD, REJECTED, SCANNED
 from app.schemas.attachments import AttachmentPayload
 from app.services.authorization import is_blocked_between
@@ -249,6 +249,58 @@ def media_type_for(attachment: Attachment) -> MediaType:
     return ACCEPTED_TYPES[attachment.detected_mime_type or attachment.declared_mime_type]
 
 
+def record_delivery(database: Session, *, attachment: Attachment, user: User) -> bool:
+    """Note that `user` now holds the bytes, and drop the shared copy once everyone does.
+
+    The owner's own download is not a delivery: there is one stored copy, and the point is to
+    release it once the people it was sent to have it. Returns True when this call removed the
+    stored object.
+    """
+    if attachment.owner_user_id == user.id or attachment.deleted_at is not None:
+        return False
+    if database.get(AttachmentDelivery, (attachment.id, user.id)) is None:
+        database.add(AttachmentDelivery(attachment_id=attachment.id, user_id=user.id))
+        database.flush()
+
+    recipients = set(
+        database.scalars(
+            select(ConversationMember.user_id).where(
+                ConversationMember.conversation_id == attachment.scope_id,
+                ConversationMember.left_at.is_(None),
+                ConversationMember.user_id != attachment.owner_user_id,
+            )
+        ).all()
+    )
+    delivered = set(
+        database.scalars(
+            select(AttachmentDelivery.user_id).where(
+                AttachmentDelivery.attachment_id == attachment.id
+            )
+        ).all()
+    )
+    if recipients and recipients <= delivered:
+        expire_attachment(database, attachment)
+        return True
+    database.commit()
+    return False
+
+
+def expire_attachment(database: Session, attachment: Attachment) -> None:
+    """Delete the stored object and leave the row as a tombstone the transcript can name."""
+    try:
+        get_storage().delete(attachment.object_key)
+    except StorageError:
+        logger.warning(
+            "could not remove a delivered attachment's object",
+            extra={
+                "event": "attachment.expire_object_failed",
+                "attachment_id": str(attachment.id),
+            },
+        )
+    attachment.deleted_at = datetime.now(UTC)
+    database.commit()
+
+
 def attachment_payload(attachment: Attachment) -> AttachmentPayload:
     """The client-facing shape: verified metadata plus a route, never a storage URL."""
     media = media_type_for(attachment)
@@ -258,6 +310,7 @@ def attachment_payload(attachment: Attachment) -> AttachmentPayload:
         content_type=media.mime,
         size_bytes=attachment.size_bytes,
         inline=media.inline,
+        expired=attachment.deleted_at is not None,
         download_url=f"/attachments/{attachment.id}/download",
     )
 

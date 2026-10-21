@@ -87,3 +87,26 @@ class Attachment(Base):
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AttachmentDelivery(Base):
+    """One row per participant that has actually fetched an attachment's bytes.
+
+    The stored object is single-copy, so it is removed once every other participant has a
+    row here. The attachment row itself stays as a tombstone: the message keeps its place and
+    says the file expired, while the reader who already received it can still open their own
+    browser-side copy.
+    """
+
+    __tablename__ = "attachment_deliveries"
+    __table_args__ = (Index("ix_attachment_deliveries_user", "user_id"),)
+
+    attachment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("attachments.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

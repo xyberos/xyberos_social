@@ -12,10 +12,13 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..450&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300,0..1,0&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300,0..1,0&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
 
     <script defer src="https://unpkg.com/htmx.org@2.0.4"></script>
+    {% if user is defined and user %}
+      <script defer src="/static/js/shell.js"></script>
+    {% endif %}
     {% if conversation_id is defined %}
       <script defer src="/static/js/chat.js"></script>
     {% endif %}
@@ -79,6 +82,7 @@
               <a class="rail-link" href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}>
                 <span class="rail-icon material-symbols-rounded" aria-hidden="true">chat_bubble</span>
                 Chat
+                <span class="unread-count" data-chat-unread aria-label="{{ chat_unread_total }} unread message{{ '' if chat_unread_total == 1 else 's' }}"{% if not chat_unread_total %} hidden{% endif %}>{{ chat_unread_total }}</span>
               </a>
               <a class="rail-link" href="/people" {% if request.url.path.startswith('/people') %}aria-current="page"{% endif %}>
                 <span class="rail-icon material-symbols-rounded" aria-hidden="true">person_search</span>
@@ -135,7 +139,7 @@
         <!-- Added hx-boost to mobile bar layout for seamless multi-device browsing transitions -->
         <nav class="mobile-tabbar" aria-label="Primary mobile navigation" hx-boost="true" hx-target="#main-content" hx-select="#main-content">
           <a href="/dashboard" {% if request.url.path.startswith('/dashboard') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">home</span><span>Dashboard</span></a>
-          <a href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span><span>Chat</span></a>
+          <a href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span><span>Chat</span><span class="unread-count unread-count-tab" data-chat-unread aria-label="{{ chat_unread_total }} unread message{{ '' if chat_unread_total == 1 else 's' }}"{% if not chat_unread_total %} hidden{% endif %}>{{ chat_unread_total }}</span></a>
           <a href="/communities" {% if request.url.path.startswith('/communities') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">groups</span><span>Groups</span></a>
           <a href="/notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">notifications</span><span>Alerts</span></a>
           <a href="/people" {% if request.url.path.startswith('/people') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">person_search</span><span>People</span></a>

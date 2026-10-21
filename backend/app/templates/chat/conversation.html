@@ -7,7 +7,7 @@
   {% if request.query_params.get('error') == 'blocked' %}<p class="alert" role="alert">A block prevents this invitation.</p>{% endif %}
   {% if request.query_params.get('error') == 'already-member' %}<p class="alert" role="status">That person is already in the group.</p>{% endif %}
   {% if request.query_params.get('error') == 'group-full' %}<p class="alert" role="alert">Groups are limited to 20 participants.</p>{% endif %}
-  <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}" aria-label="Conversation">
+  <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}"{% if anchor_message_id %} data-anchor-id="{{ anchor_message_id }}"{% endif %} aria-label="Conversation">
     <header class="chat-header">
       <div class="inbox-avatar" aria-hidden="true">{{ (peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title)[:1]|upper }}</div>
       <div class="chat-header-copy">
@@ -50,14 +50,16 @@
     {% if has_older %}<a class="older-messages" href="/conversations/{{ conversation.id }}?before={{ older_cursor }}">Load earlier messages</a>{% endif %}
     <div class="message-list" id="message-list" aria-live="polite" aria-relevant="additions text">
       {% for item in messages %}
-        <article class="message-row {{ 'message-mine' if item.mine else 'message-theirs' }}" data-message-id="{{ item.message.id }}" data-sender-id="{{ item.sender.id }}">
+        <article class="message-row {{ 'message-mine' if item.mine else 'message-theirs' }}" data-message-id="{{ item.message.id }}" data-sender-id="{{ item.sender.id }}"{% if first_unread_id and item.message.id == first_unread_id %} data-first-unread="true"{% endif %}>
           {% if conversation.kind == 'group' and not item.mine %}<span class="message-sender">{{ item.sender.display_name }}</span>{% endif %}
-          <p class="message-bubble">{{ item.message.body }}</p>
+          {% if item.message.body %}<p class="message-bubble">{{ item.message.body }}</p>{% endif %}
           {% for attachment in message_attachments.get(item.message.id, []) %}
-            {% if attachment.inline %}
-              <a class="message-attachment" href="{{ attachment.download_url }}" target="_blank" rel="noopener"><img src="{{ attachment.download_url }}" alt="{{ attachment.filename }}" loading="lazy"></a>
+            {% if attachment.expired %}
+              <span class="message-attachment message-attachment-expired" data-attachment-id="{{ attachment.id }}" data-attachment-src="{{ attachment.download_url }}" data-attachment-name="{{ attachment.filename }}" data-attachment-inline="{{ 'true' if attachment.inline else 'false' }}" data-attachment-size="{{ attachment.size_bytes }}" data-expired="true">{{ attachment.filename }} · Attachment expired</span>
+            {% elif attachment.inline %}
+              <a class="message-attachment" href="{{ attachment.download_url }}" target="_blank" rel="noopener" data-attachment-id="{{ attachment.id }}" data-attachment-src="{{ attachment.download_url }}" data-attachment-name="{{ attachment.filename }}" data-attachment-inline="true" data-attachment-size="{{ attachment.size_bytes }}"><img data-attachment-image alt="{{ attachment.filename }}" loading="lazy"></a>
             {% else %}
-              <a class="message-attachment" href="{{ attachment.download_url }}">{{ attachment.filename }} · {{ attachment.size_bytes // 1024 }} KB</a>
+              <a class="message-attachment" href="{{ attachment.download_url }}" data-attachment-id="{{ attachment.id }}" data-attachment-src="{{ attachment.download_url }}" data-attachment-name="{{ attachment.filename }}" data-attachment-inline="false" data-attachment-size="{{ attachment.size_bytes }}">{{ attachment.filename }} · {{ attachment.size_bytes // 1024 }} KB</a>
             {% endif %}
           {% endfor %}
           <time datetime="{{ item.message.created_at.isoformat() }}">{{ item.message.created_at.strftime('%H:%M') }}{% if item.mine and peer_read_at and peer_read_at >= item.message.created_at %} · Read{% endif %}</time>
@@ -69,9 +71,12 @@
       <form id="message-form" method="post" action="/conversations/{{ conversation.id }}/messages" class="message-compose">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="visually-hidden" for="message-body">Write a message</label>
-        <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message" required></textarea>
-        <label class="visually-hidden" for="message-attachments">Attach files</label>
-        <input id="message-attachments" name="attachments" type="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain">
+        <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message or attach a file"></textarea>
+        <label class="message-attach" for="message-attachments" title="Attach files">
+          <span class="material-symbols-rounded" aria-hidden="true">attach_file</span>
+          <span class="visually-hidden">Attach files</span>
+          <input id="message-attachments" name="attachments" type="file" multiple class="visually-hidden" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain">
+        </label>
         <span id="attachment-progress" class="upload-progress" role="status" aria-live="polite"></span>
         <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Send</button>
         <span id="message-error" class="message-error" role="alert"></span>

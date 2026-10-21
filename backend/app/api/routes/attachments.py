@@ -1,18 +1,19 @@
-"""Attachment upload targets, finalize, and authorized downloads.
+"""Attachment upload targets, finalize, delivery confirmation, and authorized downloads.
 
-Three steps, and each one enforces its own rule: issuing a target authorizes the uploader
-and applies the type, size, and quota ceilings; finalize verifies what actually arrived; and
-download re-authorizes the reader against the conversation the attachment belongs to.
+Four steps, and each one enforces its own rule: issuing a target authorizes the uploader and
+applies the type, size, and quota ceilings; finalize verifies what actually arrived; download
+re-authorizes the reader against the conversation the attachment belongs to; and the reader's
+confirmation releases the single stored copy once everyone it was sent to has one.
 """
 
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import authenticated_user
+from app.api.deps import authenticated_form_user, authenticated_user
 from app.core.database import get_db
 from app.core.scoping import conversation_scope
 from app.core.security import check_rate_limit
@@ -109,6 +110,27 @@ def finalize_attachment(
         database, attachment_id=attachment_id, user=user
     )
     return attachment_service.attachment_payload(attachment)
+
+
+@router.post("/attachments/{attachment_id}/received")
+def confirm_attachment_delivery(
+    attachment_id: UUID,
+    request: Request,
+    csrf_token: str = Form(),
+    database: Session = Depends(get_db),
+):
+    """Confirm the reader's browser kept a copy, which is what releases the stored object.
+
+    The download alone is not the trigger: a reader that fetched the bytes but could not keep
+    them (storage disabled, private window) would otherwise lose the file for good. Only the
+    page that actually stored a local copy says so.
+    """
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    attachment = attachment_service.attachment_for_download(
+        database, attachment_id=attachment_id, user=user
+    )
+    released = attachment_service.record_delivery(database, attachment=attachment, user=user)
+    return {"status": "ok", "released": released, "expired": attachment.deleted_at is not None}
 
 
 @router.get("/attachments/{attachment_id}/download")

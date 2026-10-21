@@ -12,7 +12,7 @@
         <div class="inbox-avatar" aria-hidden="true">{{ (item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title)[:1]|upper }}</div>
         <div class="inbox-copy">
           <div class="inbox-title-row">
-            <strong>{{ item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title }}</strong>
+            <strong class="inbox-title{% if item.unread_count %} inbox-title-unread{% endif %}">{{ item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title }}{% if item.unread_count %}<span class="visually-hidden">, {{ item.unread_count }} unread message{{ '' if item.unread_count == 1 else 's' }}</span>{% endif %}</strong>
             {% if item.latest %}<time datetime="{{ item.latest.created_at.isoformat() }}">{{ item.latest.created_at.strftime('%b %d · %H:%M') }}</time>{% endif %}
           </div>
           {% if item.latest %}<span class="inbox-preview">{% if item.latest.sender_id == user.id %}You: {% endif %}{{ item.latest.body[:100] }}</span>
@@ -20,7 +20,6 @@
           {% else %}<span class="inbox-preview">Start a conversation</span>{% endif %}
         </div>
         {% if item.blocked %}<span class="muted-status">Blocked</span>{% endif %}
-        {% if item.unread_count %}<span class="unread-count" aria-label="{{ item.unread_count }} unread messages">{{ item.unread_count }}</span>{% endif %}
       </a>
     {% else %}
       <div class="inbox-empty">

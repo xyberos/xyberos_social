@@ -2,7 +2,7 @@
 
 from app.models.identity import User, UserSession, PasswordResetToken
 from app.models.social import UserRelationship
-from app.models.attachments import Attachment
+from app.models.attachments import Attachment, AttachmentDelivery
 from app.models.audit import PlatformAuditEvent
 from app.models.communities import Community, CommunityMembership, CommunityAuditEvent
 from app.models.content import AUDIENCES, Post, Comment, ContentReport, ModerationEvent
@@ -18,6 +18,7 @@ from app.models.outbox import OutboxEvent
 
 __all__ = [
     "Attachment",
+    "AttachmentDelivery",
     "AUDIENCES",
     "Comment",
     "Community",
