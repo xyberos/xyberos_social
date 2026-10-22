@@ -475,7 +475,8 @@ def test_followers_feed_includes_personal_updates(client_factory):
 
     people_feed = follower.get("/dashboard?source=people&days=7")
     assert "An update from a followed person." in people_feed.text
-    assert "Personal update" in people_feed.text
+    # A personal update carries no community label, so its own page is what the feed links to.
+    assert 'class="post-excerpt"' in people_feed.text
 
     # A personal update has no community, so the community source cannot contain it.
     community_feed = follower.get("/dashboard?source=communities&days=7")

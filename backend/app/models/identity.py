@@ -29,6 +29,7 @@ class User(Base):
         ),
         CheckConstraint("updates_days IN (1, 7, 30, 90)", name="ck_user_updates_days"),
         CheckConstraint("updates_limit IN (1, 5, 10, 20, 50)", name="ck_user_updates_limit"),
+        CheckConstraint("theme IN ('system', 'light', 'dark')", name="ck_user_theme"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -41,6 +42,12 @@ class User(Base):
     quiet_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notify_replies: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notify_moderation: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_calls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # "Who can call me": false means no invite is created for this account at all. It is a
+    # settings-model decision, checked at ring time, and it never hides an existing call.
+    accept_calls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Follows the device until the reader chooses; the cookie mirrors this for signed-out pages.
+    theme: Mapped[str] = mapped_column(String(8), default="system", nullable=False)
     updates_source: Mapped[str] = mapped_column(String(16), default="all", nullable=False)
     updates_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     updates_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)

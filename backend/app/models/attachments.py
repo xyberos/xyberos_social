@@ -9,9 +9,13 @@ Two lifecycle notes:
 * `scan_state` gates downloads. `pending_upload` means a target was issued and nothing has
   been verified; `pending_scan` means the object exists but no verdict does; only `scanned`
   is downloadable, and `rejected` never is.
-* `message_id` cascades, so deleting a message drops its attachment rows. The object is
-  removed by `services/attachments.py` before that happens, because object storage cannot
-  cascade — a row that disappears without its object leaves bytes nobody can reach.
+* `message_id` and `post_id` cascade, so deleting the message or post drops its attachment
+  rows. The object is removed by `services/attachments.py` before that happens, because
+  object storage cannot cascade — a row that disappears without its object leaves bytes
+  nobody can reach.
+* A conversation attachment is released once every recipient holds a copy, because the
+  point of a chat file is that it was received. A post attachment is not: a post is read by
+  whoever arrives later, so its bytes stay until the account removes them.
 """
 
 from datetime import datetime
@@ -56,6 +60,7 @@ class Attachment(Base):
         UniqueConstraint("object_key", name="uq_attachment_object_key"),
         Index("ix_attachments_owner_state", "owner_user_id", "scan_state"),
         Index("ix_attachments_message", "message_id"),
+        Index("ix_attachments_post", "post_id"),
         Index("ix_attachments_scope_created", "scope_type", "scope_id", "created_at"),
         Index("ix_attachments_expiry", "scan_state", "expires_at"),
     )
@@ -68,6 +73,9 @@ class Attachment(Base):
     scope_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     message_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("conversation_messages.id", ondelete="CASCADE"), nullable=True
+    )
+    post_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), nullable=True
     )
     object_key: Mapped[str] = mapped_column(String(255))
     original_filename: Mapped[str] = mapped_column(String(200), default="", nullable=False)

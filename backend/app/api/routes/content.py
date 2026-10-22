@@ -34,6 +34,7 @@ from app.services.comments import comment_tree
 from app.services.communities import add_moderation_event
 from app.services.notifications import queue_notification
 from app.services.outbox import enqueue_event
+from app.services import attachments as attachment_service
 
 router = APIRouter()
 
@@ -338,6 +339,7 @@ def compose_personal_post(
             browser_session,
             user=user,
             error=request.query_params.get("error"),
+            media=attachment_service.composer_limits(),
         ),
     )
 
@@ -353,6 +355,7 @@ def create_personal_post(
     audience: str = Form("followers"),
     csrf_token: str = Form(),
     return_to: str = Form(""),
+    attachment_ids: list[UUID] = Form(default=[]),
     database: Session = Depends(get_db),
 ):
     user, _ = authenticated_form_user(request, database, csrf_token)
@@ -361,36 +364,52 @@ def create_personal_post(
     origin = return_page(return_to, "/posts/new")
     if not check_rate_limit(client_key(request), "create-post", limit=5, seconds=60):
         return RedirectResponse(f"{origin}?error=slow-down", status_code=303)
-    # The text carries the update; the title is optional context for it.
-    if len(title) > 140 or not body or len(body) > 10000:
+    # The text carries the update, but a photo, a clip, or a track can be the whole of it:
+    # the rule is "something to publish", not "something to read".
+    has_media = bool(attachment_ids)
+    if len(title) > 140 or (not body and not has_media) or len(body) > 10000:
         return RedirectResponse(f"{origin}?error=invalid-post", status_code=303)
     if audience not in AUDIENCES:
         return RedirectResponse(f"{origin}?error=invalid-audience", status_code=303)
-    duplicate_since = datetime.now(UTC) - timedelta(hours=24)
-    duplicate = database.scalar(
-        select(Post.id).where(
-            Post.community_id.is_(None),
-            Post.author_id == user.id,
-            Post.title == (title or None),
-            Post.body == body,
-            Post.created_at >= duplicate_since,
-            Post.removed_at.is_(None),
+    if has_media and not attachment_service.can_attach_count(attachment_ids):
+        return RedirectResponse(f"{origin}?error=invalid-media", status_code=303)
+    # Duplicate detection is about repeated words. A media-only update has no words, so two
+    # photo posts in a day are two posts, not one sent twice.
+    if body:
+        duplicate_since = datetime.now(UTC) - timedelta(hours=24)
+        duplicate = database.scalar(
+            select(Post.id).where(
+                Post.community_id.is_(None),
+                Post.author_id == user.id,
+                Post.title == (title or None),
+                Post.body == body,
+                Post.created_at >= duplicate_since,
+                Post.removed_at.is_(None),
+            )
         )
-    )
-    if duplicate is not None:
-        return RedirectResponse(f"{origin}?error=duplicate-post", status_code=303)
+        if duplicate is not None:
+            return RedirectResponse(f"{origin}?error=duplicate-post", status_code=303)
     post = Post(
         community_id=None, author_id=user.id, title=title or None, body=body, audience=audience
     )
     database.add(post)
     database.flush()
+    try:
+        attachment_service.attach_to_post(
+            database, post=post, user=user, attachment_ids=attachment_ids
+        )
+    except HTTPException:
+        # Nothing is published: the transaction is rolled back and the composer keeps the
+        # text the reader wrote.
+        database.rollback()
+        return RedirectResponse(f"{origin}?error=invalid-media", status_code=303)
     enqueue_event(
         database,
         event=events.POST_CREATED,
         aggregate_type="post",
         aggregate_id=post.id,
         scope=account_scope(user.id),
-        payload={"author_id": str(user.id)},
+        payload={"author_id": str(user.id), "media": len(attachment_ids)},
     )
     database.commit()
     return RedirectResponse(f"/posts/{post.id}", status_code=303)
@@ -413,6 +432,10 @@ def personal_post_detail(
             "user": user,
             "post": post,
             "author": database.get(User, post.author_id),
+            "media": [
+                attachment_service.attachment_payload(item)
+                for item in attachment_service.attachments_for_post(database, post.id)
+            ],
             "comments": comment_tree(database, post.id, hidden_author_ids),
             "csrf_token": browser_session.csrf_token if browser_session else None,
             "error": request.query_params.get("error"),

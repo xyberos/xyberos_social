@@ -2,22 +2,23 @@
 
 Four steps, and each one enforces its own rule: issuing a target authorizes the uploader and
 applies the type, size, and quota ceilings; finalize verifies what actually arrived; download
-re-authorizes the reader against the conversation the attachment belongs to; and the reader's
-confirmation releases the single stored copy once everyone it was sent to has one.
+re-authorizes the reader against the conversation or post the attachment belongs to; and the
+reader's confirmation releases the single stored copy of a chat file once everyone it was
+sent to has one.
 """
 
 from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import authenticated_form_user, authenticated_user
 from app.core.database import get_db
 from app.core.scoping import conversation_scope
 from app.core.security import check_rate_limit
-from app.core.storage import StorageError, get_storage
+from app.core.storage import StorageError
 from app.models import User
 from app.schemas.attachments import UploadTargetRequest, UploadTargetResponse
 from app.services import attachments as attachment_service
@@ -139,7 +140,12 @@ def download_attachment(
     request: Request,
     database: Session = Depends(get_db),
 ):
-    """Serve bytes to a reader who is entitled to them right now, never from a public URL."""
+    """Serve bytes to a reader who is entitled to them right now, never from a public URL.
+
+    The response is streamed and range-aware, because a video is played by a browser that
+    asks for one part of it at a time. Ranges are answered from the size this pipeline
+    recorded at finalize, so a reader cannot ask for bytes past what was verified.
+    """
     user = _signed_in(request, database)
     if not check_rate_limit(
         f"attachment:{user.id}", "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
@@ -149,15 +155,10 @@ def download_attachment(
         database, attachment_id=attachment_id, user=user
     )
     media = attachment_service.media_type_for(attachment)
-    try:
-        body = get_storage().get_bytes(attachment.object_key)
-    except StorageError:
-        raise HTTPException(
-            status_code=503, detail="The attachment is temporarily unavailable."
-        ) from None
+    size = attachment.size_bytes
 
     headers = {
-        # Every download states what it is; only allowlisted images may be rendered inline,
+        # Every download states what it is; only allowlisted media may be rendered inline,
         # and the filename is encoded so it cannot inject a header of its own.
         "Content-Disposition": (
             f"{'inline' if media.inline else 'attachment'}; "
@@ -165,7 +166,30 @@ def download_attachment(
         ),
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=300",
+        "Accept-Ranges": "bytes",
     }
     if media.inline:
         headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    return Response(content=body, media_type=media.mime, headers=headers)
+
+    try:
+        requested = attachment_service.parse_byte_range(request.headers.get("range", ""), size)
+    except ValueError:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+        )
+    try:
+        if requested is None:
+            stream = attachment_service.open_object(attachment)
+            headers["Content-Length"] = str(size)
+            return StreamingResponse(stream, media_type=media.mime, headers=headers)
+        start, end = requested
+        length = end - start + 1
+        stream = attachment_service.open_object(attachment, start=start, length=length)
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(length)
+        return StreamingResponse(stream, status_code=206, media_type=media.mime, headers=headers)
+    except StorageError:
+        raise HTTPException(
+            status_code=503, detail="The attachment is temporarily unavailable."
+        ) from None

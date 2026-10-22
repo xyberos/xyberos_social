@@ -32,8 +32,8 @@
             {% if not openable %}<span class="kind-badge">Community left</span>{% endif %}
           </div>
           <h2 class="workspace-title">
-            {% if openable %}<a href="{{ post_url }}">{{ post.title or post.body[:90] }}</a>
-            {% else %}{{ post.title or post.body[:90] }}{% endif %}
+            {% if openable %}<a href="{{ post_url }}">{{ post.title or post.body[:90] or 'Photo update' }}</a>
+            {% else %}{{ post.title or post.body[:90] or 'Photo update' }}{% endif %}
           </h2>
           {% if post.title and post.body %}<p class="workspace-excerpt">{{ post.body[:140] }}{% if post.body|length > 140 %}…{% endif %}</p>{% endif %}
           <div class="workspace-row-actions">

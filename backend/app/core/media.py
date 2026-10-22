@@ -4,6 +4,13 @@ The type of an upload is decided from its bytes. A declared content type and a f
 claims, not evidence, so both are compared against what the bytes actually are and a
 mismatch is a rejection rather than a coercion.
 
+The comparison is made against a *family* rather than a single mime type, because one
+container names more than one of the formats people upload: an `ftyp` box is the honest
+reading of `video/mp4` and `audio/mp4` alike, and telling them apart from a header would be a
+guess dressed as a check. Families are what the bytes prove; the declared type stays the
+client's choice within a family, and it is what the response header and the rendering hint
+come from.
+
 SVG and HTML are not merely scanned, they are refused: both execute in a browser, and no
 scanner verdict makes them safe to serve from the application's origin.
 """
@@ -18,6 +25,17 @@ from PIL import Image, UnidentifiedImageError
 MAX_IMAGE_PIXELS = 40_000_000
 READ_CHUNK = 64 * 1024
 
+# Enough of a container header to name it: sniffing reads the first box, and an EBML DocType
+# sits inside the first few hundred bytes.
+SAMPLE_BYTES = 512 * 1024
+
+IMAGE = "image"
+VIDEO = "video"
+AUDIO = "audio"
+DOCUMENT = "document"
+
+KINDS = (IMAGE, VIDEO, AUDIO, DOCUMENT)
+
 
 class UnsupportedMedia(Exception):
     """The bytes are not one of the accepted attachment types."""
@@ -27,17 +45,29 @@ class UnsupportedMedia(Exception):
 class MediaType:
     mime: str
     extension: str
+    # Inline types are the ones a page renders; the rest are offered as a download.
     inline: bool
-    image: bool
+    kind: str
+    # What `detect_family` must answer for these bytes to be this type.
+    family: str
 
 
 ACCEPTED_TYPES: dict[str, MediaType] = {
-    "image/jpeg": MediaType("image/jpeg", "jpg", True, True),
-    "image/png": MediaType("image/png", "png", True, True),
-    "image/gif": MediaType("image/gif", "gif", True, True),
-    "image/webp": MediaType("image/webp", "webp", True, True),
-    "application/pdf": MediaType("application/pdf", "pdf", False, False),
-    "text/plain": MediaType("text/plain", "txt", False, False),
+    "image/jpeg": MediaType("image/jpeg", "jpg", True, IMAGE, "jpeg"),
+    "image/png": MediaType("image/png", "png", True, IMAGE, "png"),
+    "image/gif": MediaType("image/gif", "gif", True, IMAGE, "gif"),
+    "image/webp": MediaType("image/webp", "webp", True, IMAGE, "webp"),
+    # MP4 and M4A are one container: the brand box states what a file claims, and a player
+    # decides from the streams inside. Both spellings live in the same family.
+    "video/mp4": MediaType("video/mp4", "mp4", True, VIDEO, "isobmff"),
+    "audio/mp4": MediaType("audio/mp4", "m4a", True, AUDIO, "isobmff"),
+    "video/webm": MediaType("video/webm", "webm", True, VIDEO, "webm"),
+    "audio/webm": MediaType("audio/webm", "weba", True, AUDIO, "webm"),
+    "audio/mpeg": MediaType("audio/mpeg", "mp3", True, AUDIO, "mpeg-audio"),
+    "audio/ogg": MediaType("audio/ogg", "ogg", True, AUDIO, "ogg"),
+    "audio/wav": MediaType("audio/wav", "wav", True, AUDIO, "wav"),
+    "application/pdf": MediaType("application/pdf", "pdf", False, DOCUMENT, "pdf"),
+    "text/plain": MediaType("text/plain", "txt", False, DOCUMENT, "text"),
 }
 
 _IMAGE_FORMATS = {
@@ -49,23 +79,53 @@ _IMAGE_FORMATS = {
 
 DECLARED_CONTENT_TYPES = tuple(ACCEPTED_TYPES)
 
+# What the composer's picker offers. Audio and video are the kinds this phase adds.
+MEDIA_CONTENT_TYPES = tuple(
+    mime for mime, media in ACCEPTED_TYPES.items() if media.kind in {IMAGE, VIDEO, AUDIO}
+)
+
 
 def is_accepted(mime: str) -> bool:
     return mime in ACCEPTED_TYPES
 
 
-def detect_mime(data: bytes) -> str | None:
-    """Sniff the leading bytes; the extension and the declaration are ignored on purpose."""
+def kind_for(mime: str) -> str | None:
+    media = ACCEPTED_TYPES.get(mime)
+    return media.kind if media else None
+
+
+def family_for(mime: str) -> str | None:
+    media = ACCEPTED_TYPES.get(mime)
+    return media.family if media else None
+
+
+def detect_family(data: bytes) -> str | None:
+    """Name the container from its leading bytes; the extension and declaration are ignored."""
     if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
+        return "jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
+        return "png"
     if data[:6] in {b"GIF87a", b"GIF89a"}:
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
+        return "gif"
+    if data[:4] == b"RIFF":
+        # One RIFF header covers both of the containers this application accepts.
+        if data[8:12] == b"WEBP":
+            return "webp"
+        if data[8:12] == b"WAVE":
+            return "wav"
+        return None
     if data.startswith(b"%PDF-"):
-        return "application/pdf"
+        return "pdf"
+    if data[4:8] == b"ftyp":
+        return "isobmff"
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        # EBML is Matroska's shell. Only the WebM profile is accepted: a Matroska file is
+        # refused rather than relabelled, because a browser will not play it.
+        return "webm" if b"webm" in data[:512] else None
+    if data.startswith(b"OggS"):
+        return "ogg"
+    if data.startswith(b"ID3") or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "mpeg-audio"
     return None
 
 

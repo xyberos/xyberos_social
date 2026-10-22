@@ -73,6 +73,35 @@ services:
     ports:
       - "9000:5000"
 
+  # Opt-in TURN relay for calls. Start it with:
+  #   docker compose --profile calls up -d
+  # then point the app at it with WEBRTC_TURN_URLS=turn:localhost:3478?transport=udp and
+  # WEBRTC_TURN_SECRET=local-turn-secret. coturn uses the REST credential mechanism, so there
+  # is no static user: the app mints a short-lived username/credential per session. Relayed
+  # media is ciphertext the relay cannot read.
+  #
+  # Host networking is deliberate: a relay advertises the address it allocated on, and a
+  # bridged container advertises an address a browser on the host cannot reach. Docker Desktop
+  # does not implement host networking, so on Windows or macOS use a hosted relay with the same
+  # shared secret, or run coturn natively. A public deployment terminates TLS and sizes the
+  # relay by egress.
+  turn:
+    image: coturn/coturn:4.6.3
+    profiles: ["calls"]
+    network_mode: host
+    command:
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=local-turn-secret
+      - --realm=social.local
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --min-port=49160
+      - --max-port=49200
+      - --log-file=stdout
+
   # Opt-in malware scanning. Start it with:
   #   docker compose --profile scanning up -d
   # and set CLAMAV_HOST=clamav on the app service. Signature updates make the first start

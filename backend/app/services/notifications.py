@@ -23,6 +23,7 @@ def queue_notification(
         or recipient.quiet_mode
         or (category == "reply" and not recipient.notify_replies)
         or (category == "moderation" and not recipient.notify_moderation)
+        or (category == "call" and not recipient.notify_calls)
     ):
         return
     database.add(

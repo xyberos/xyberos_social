@@ -44,7 +44,10 @@ def _app_csp(endpoint_url: str | None) -> str:
         "style-src 'self' https://fonts.googleapis.com; "
         # blob: lets a delivered attachment render from the reader's own local copy after the
         # stored object is released.
-        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; object-src 'none'; "
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; "
+        # A post's bytes are served from this origin; blob: covers the composer's preview of
+        # a file that is still uploading, and the chat's local copy of a received one.
+        "media-src 'self' blob:; object-src 'none'; "
         # connect-src covers the same-origin chat WebSocket and the attachment upload target.
         f"connect-src {' '.join(connect_sources)}; base-uri 'self'; "
         "frame-ancestors 'none'; form-action 'self'"
@@ -67,7 +70,10 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # A page that needs a device permission sets its own deliberate policy; everything else
+    # gets the restrictive one. Only the call surface asks for the microphone.
+    if "Permissions-Policy" not in response.headers:
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # A route may set its own deliberate policy (attachment delivery serves stored media under
     # a narrower one); everything else gets the application policy for its route class.
     if "Content-Security-Policy" not in response.headers:

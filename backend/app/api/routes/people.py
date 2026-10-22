@@ -9,6 +9,7 @@ from app.api.deps import authenticated_form_user, authenticated_user, current_se
 from app.api.responses import redirect_people, render
 from app.core.database import get_db
 from app.models import Post, User, UserRelationship
+from app.services import calls as calls_service
 from app.services.authorization import (
     is_blocked_between,
     is_following,
@@ -187,7 +188,7 @@ def unfollow_user(
 
 
 @router.post("/people/{target_id}/block")
-def block_user(
+async def block_user(
     target_id: UUID,
     request: Request,
     csrf_token: str = Form(),
@@ -217,7 +218,11 @@ def block_user(
     ).all()
     for follow in follows:
         database.delete(follow)
+    # A block removes both accounts from any call they share, before it is committed.
+    call_changes = calls_service.remove_blocked_pair_from_calls(database, user.id, target.id)
     database.commit()
+    if call_changes:
+        await calls_service.publish_calls(database, call_changes)
     return redirect_people(next_url=next_url)
 
 

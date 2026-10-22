@@ -1,0 +1,20 @@
+{# Theme is a device preference that also lives on the account. It works as a plain form
+   post without JavaScript, and theme.js upgrades it to an instant switch. #}
+<details class="theme-menu" hx-boost="false">
+  <summary class="topbar-icon theme-trigger" aria-label="Theme: {{ theme_current.label }}" title="Theme: {{ theme_current.label }}">
+    <span class="material-symbols-rounded" aria-hidden="true">{{ theme_current.icon }}</span>
+  </summary>
+  <form class="theme-menu-panel" method="post" action="/theme">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <p class="theme-menu-title">Theme</p>
+    {% for option in theme_options %}
+      <button class="theme-option" type="submit" name="theme" value="{{ option.value }}"
+              data-theme-value="{{ option.value }}"
+              aria-pressed="{{ 'true' if option.value == theme_choice else 'false' }}">
+        <span class="material-symbols-rounded" aria-hidden="true">{{ option.icon }}</span>
+        {{ option.label }}
+        <span class="material-symbols-rounded theme-option-check" aria-hidden="true">check</span>
+      </button>
+    {% endfor %}
+  </form>
+</details>

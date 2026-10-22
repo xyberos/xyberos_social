@@ -22,6 +22,8 @@ APPLICATION_TABLES = {
     "comments",
     "conversations",
     "conversation_messages",
+    "calls",
+    "call_participants",
     "notifications",
     "platform_audit_events",
     "outbox_events",

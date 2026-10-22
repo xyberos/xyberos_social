@@ -44,6 +44,11 @@ CONVERSATION_MEMBER_REMOVED = "conversation.member.removed"
 CONVERSATION_MEMBER_LEFT = "conversation.member.left"
 MESSAGE_CREATED = "message.created"
 
+# Calls. Metadata only: the outbox carries who joined and how a call ended, never media.
+CALL_STARTED = "call.started"
+CALL_ACCEPTED = "call.accepted"
+CALL_ENDED = "call.ended"
+
 SOCIAL_EVENTS = (
     ACCOUNT_DELETED,
     COMMUNITY_CREATED,
@@ -68,6 +73,9 @@ SOCIAL_EVENTS = (
     CONVERSATION_MEMBER_REMOVED,
     CONVERSATION_MEMBER_LEFT,
     MESSAGE_CREATED,
+    CALL_STARTED,
+    CALL_ACCEPTED,
+    CALL_ENDED,
 )
 
 # Reserved for Phases 11-14: named now so the namespace stays single and the commercial

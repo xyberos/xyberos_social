@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme_effective %} data-theme="{{ theme_effective }}"{% endif %} data-theme-choice="{{ theme_choice }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="{{ theme_effective or 'light dark' }}">
     <!-- htmx otherwise injects its indicator stylesheet inline, which the application's CSP
          forbids and which this app does not use: no template renders a .htmx-indicator. -->
     <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
@@ -16,10 +16,12 @@
     <link rel="stylesheet" href="/static/css/styles.css">
 
     <script defer src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="/static/js/theme.js"></script>
     {% if user is defined and user %}
       <script defer src="/static/js/shell.js"></script>
     {% endif %}
     {% if conversation_id is defined %}
+      <script defer src="/static/js/safety-number.js"></script>
       <script defer src="/static/js/chat.js"></script>
     {% endif %}
   </head>
@@ -34,6 +36,9 @@
       <header class="topbar" hx-boost="true" hx-target="#main-content" hx-select="#main-content">
         <div class="topbar-inner">
           <a class="wordmark" href="/" aria-label="Social+ home">social+</a>
+
+          <div class="topbar-tools">
+          {% include "partials/theme_menu.html" %}
 
           {% if user is defined and user %}
             <nav class="topbar-actions" aria-label="Main navigation">
@@ -68,6 +73,7 @@
               <a class="button button-primary" href="/register">Join</a>
             </nav>
           {% endif %}
+          </div>
         </div>
       </header>
 

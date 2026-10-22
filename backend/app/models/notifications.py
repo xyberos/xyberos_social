@@ -22,7 +22,9 @@ from app.core.database import Base
 class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (
-        CheckConstraint("category IN ('reply', 'moderation')", name="ck_notification_category"),
+        CheckConstraint(
+            "category IN ('reply', 'moderation', 'call')", name="ck_notification_category"
+        ),
         Index("ix_notifications_recipient_created", "recipient_user_id", "created_at", "id"),
     )
 

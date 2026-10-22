@@ -176,6 +176,48 @@ http_request_duration = registry.register(
     )
 )
 
+# Call labels are bounded by construction: two media kinds, two conversation kinds, six end
+# reasons, and three signaling types.
+calls_started = registry.register(
+    Counter(
+        "soccom_calls_started_total",
+        "Calls started, by media and conversation kind.",
+        ("media", "kind"),
+    )
+)
+
+calls_ended = registry.register(
+    Counter(
+        "soccom_calls_ended_total",
+        "Calls ended, by the recorded end reason.",
+        ("reason",),
+    )
+)
+
+call_ring_duration = registry.register(
+    Histogram(
+        "soccom_call_ring_duration_seconds",
+        "Seconds between a call ringing and its first participant joining.",
+        (),
+    )
+)
+
+call_signals = registry.register(
+    Counter(
+        "soccom_call_signals_total",
+        "Signaling packets relayed, by signal type.",
+        ("signal",),
+    )
+)
+
+call_rejections = registry.register(
+    Counter(
+        "soccom_call_rejections_total",
+        "Call actions refused, by reason.",
+        ("reason",),
+    )
+)
+
 
 def gauge(name: str, help_text: str, samples: list[tuple[dict[str, object], float]]) -> str:
     """Render a scrape-time gauge block, whose values are read rather than accumulated."""

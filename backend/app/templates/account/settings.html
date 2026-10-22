@@ -51,6 +51,30 @@
       <label class="setting-toggle"><input type="checkbox" name="quiet_mode" value="true" {% if user.quiet_mode %}checked{% endif %}><span><strong>Quiet mode</strong><small>Pause new in-app notifications. Existing notifications remain in your inbox.</small></span></label>
       <label class="setting-toggle"><input type="checkbox" name="notify_replies" value="true" {% if user.notify_replies %}checked{% endif %}><span><strong>Discussion replies</strong><small>Notify me when someone replies to my post or comment.</small></span></label>
       <label class="setting-toggle"><input type="checkbox" name="notify_moderation" value="true" {% if user.notify_moderation %}checked{% endif %}><span><strong>Report outcomes</strong><small>Notify me when a moderator reviews a report I submitted.</small></span></label>
+      <label class="setting-toggle"><input type="checkbox" name="notify_calls" value="true" {% if user.notify_calls %}checked{% endif %}><span><strong>Missed calls</strong><small>Notify me about calls I did not answer.</small></span></label>
+    </section>
+
+    <section class="settings-section" aria-labelledby="calls-settings-title">
+      <div class="section-heading">
+        <p class="eyebrow">Your boundaries</p>
+        <h2 id="calls-settings-title">Calls</h2>
+      </div>
+      <label class="setting-toggle"><input type="checkbox" name="accept_calls" value="true" {% if user.accept_calls %}checked{% endif %}><span><strong>Accept calls</strong><small>Let people I can message ring me. A block always prevents a call in either direction, and turning this off does not hide a call already in progress. Calls are encrypted between the devices taking part; the server records who called whom, when, and how it ended, but never the audio or video.</small></span></label>
+    </section>
+    <section class="settings-section" aria-labelledby="appearance-settings-title">
+      <div class="section-heading">
+        <p class="eyebrow">Your screen</p>
+        <h2 id="appearance-settings-title">Appearance</h2>
+      </div>
+      <div class="theme-choice" role="radiogroup" aria-labelledby="appearance-settings-title">
+        {% for option in theme_options %}
+          <label class="theme-card">
+            <input type="radio" name="theme" value="{{ option.value }}" data-preview {% if user.theme == option.value %}checked{% endif %}>
+            <span class="material-symbols-rounded" aria-hidden="true">{{ option.icon }}</span>
+            <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
+          </label>
+        {% endfor %}
+      </div>
     </section>
     <button class="button button-primary settings-save" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save settings</button>
   </form>

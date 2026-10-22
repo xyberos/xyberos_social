@@ -30,5 +30,7 @@ class AttachmentPayload(BaseModel):
     content_type: str
     size_bytes: int
     inline: bool
+    # One of image, video, audio, document: what element the reader's page renders.
+    kind: str = "document"
     expired: bool = False
     download_url: str

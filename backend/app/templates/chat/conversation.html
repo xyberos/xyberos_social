@@ -7,7 +7,7 @@
   {% if request.query_params.get('error') == 'blocked' %}<p class="alert" role="alert">A block prevents this invitation.</p>{% endif %}
   {% if request.query_params.get('error') == 'already-member' %}<p class="alert" role="status">That person is already in the group.</p>{% endif %}
   {% if request.query_params.get('error') == 'group-full' %}<p class="alert" role="alert">Groups are limited to 20 participants.</p>{% endif %}
-  <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}"{% if anchor_message_id %} data-anchor-id="{{ anchor_message_id }}"{% endif %} aria-label="Conversation">
+  <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}" data-ice-servers="{{ ice_servers }}"{% if anchor_message_id %} data-anchor-id="{{ anchor_message_id }}"{% endif %} aria-label="Conversation">
     <header class="chat-header">
       <div class="inbox-avatar" aria-hidden="true">{{ (peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title)[:1]|upper }}</div>
       <div class="chat-header-copy">
@@ -15,8 +15,55 @@
         {% if conversation.kind == 'direct' and peer %}<span>@{{ peer.user.username }}</span>
         {% else %}<span>{{ participants|length }} participants</span>{% endif %}
       </div>
+      {% if not blocked %}
+        <div class="chat-call-actions">
+          <button id="start-audio-call" class="chat-call-button" type="button" aria-label="Start audio call" title="Start audio call">
+            <span class="material-symbols-rounded" aria-hidden="true">call</span>
+          </button>
+          <button id="start-video-call" class="chat-call-button" type="button" aria-label="Start video call" title="Start video call">
+            <span class="material-symbols-rounded" aria-hidden="true">videocam</span>
+          </button>
+        </div>
+      {% endif %}
       <span id="chat-connection-state" class="connection-state" role="status">Connecting…</span>
     </header>
+
+    {% if not blocked %}
+      <section id="call-panel" class="call-panel" aria-label="Call" hidden>
+        <div class="call-head">
+          <div class="call-copy">
+            <p id="call-status" class="call-status" role="status" aria-live="polite"></p>
+            <p id="call-detail" class="call-detail" hidden></p>
+          </div>
+          <div class="call-actions">
+            <button id="call-answer" class="button button-primary" type="button" hidden>
+              <span class="material-symbols-rounded" aria-hidden="true">call</span>Answer
+            </button>
+            <button id="call-mute" class="button button-quiet" type="button" aria-pressed="false" hidden>
+              <span id="call-mute-icon" class="material-symbols-rounded" aria-hidden="true">mic</span>Mute
+            </button>
+            <button id="call-camera" class="button button-quiet" type="button" hidden>
+              <span id="call-camera-icon" class="material-symbols-rounded" aria-hidden="true">videocam</span><span id="call-camera-label">Camera off</span>
+            </button>
+            <button id="call-decline" class="button button-quiet danger-button" type="button" hidden>
+              <span class="material-symbols-rounded" aria-hidden="true">call_end</span>Decline
+            </button>
+            <button id="call-hangup" class="button danger-action" type="button" hidden>
+              <span class="material-symbols-rounded" aria-hidden="true">call_end</span><span id="call-hangup-label">End call</span>
+            </button>
+          </div>
+        </div>
+        <div id="call-remotes" class="call-tiles" hidden></div>
+        <div id="call-self-tile" class="call-tile call-tile-self" hidden>
+          <video id="call-self-video" muted playsinline autoplay></video>
+          <span class="call-tile-label">You</span>
+        </div>
+        <div id="call-safety" class="call-safety" hidden>
+          <p id="call-safety-note" class="call-safety-note"></p>
+          <ul id="call-safety-list" class="call-safety-list" hidden></ul>
+        </div>
+      </section>
+    {% endif %}
 
     {% if conversation.kind == 'group' %}
       <div class="group-tools">

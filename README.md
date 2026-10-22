@@ -17,7 +17,38 @@ Social+ is a finite social communication platform. Phases 1–6 of [implementati
 - Relationships: follows and blocks are unique directed edges. A block prevents follows in either direction and removes follows already present between the two accounts.
 - Communities: public communities are discoverable and joinable by signed-in users. Private communities do not appear in discovery and return a non-revealing 404 to non-members; owners and moderators can invite users by username. Owners alone can grant or revoke moderator roles; moderators can remove ordinary members. Administrative changes are audited.
 - Discussions: community members can create bounded text posts and threaded comments. Post reads respect community privacy and block relationships. Authors can remove their own content; owners/moderators can remove content, lock discussions, review reports, and leave moderation events. Exact duplicate posts and rapid posting are rate-limited.
-- Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. A conversation opens on its first unread message — the newest one when nothing is unread — and follows arriving messages only while the reader is already at the end, so scrolling back is never interrupted. Every signed-in page also holds `/ws/inbox`, which carries only the reader's own unread total so the Chat badge updates without a reload. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Presence, calls, media, and end-to-end encryption are not in the current build.
+- Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. A conversation opens on its first unread message — the newest one when nothing is unread — and follows arriving messages only while the reader is already at the end, so scrolling back is never interrupted. Every signed-in page also holds `/ws/inbox`, which carries only the reader's own unread total so the Chat badge updates without a reload. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Conversations also carry 1:1 and group audio and video calls (see [Calls](#calls)). Presence, media on posts, and end-to-end message encryption are not in the current build.
+
+## Interface and themes
+
+The shell is server-rendered and theme-aware without a flash of the wrong palette. A reader
+chooses **System**, **Light**, or **Dark** from the switch in the top bar (it is present on every
+page, signed in or out) and from Appearance in settings. `system` leaves `data-theme` off the
+`<html>` element so a `prefers-color-scheme` block decides; an explicit choice renders
+`data-theme="light"` or `"dark"` with the first byte of HTML. The choice lives on the account
+(`users.theme`, migration `0017_user_theme`) and in an HttpOnly cookie for signed-out pages, so
+the login screen matches what the reader will see afterwards. The menu is a plain form post and
+works without JavaScript; `static/js/theme.js` upgrades it to an instant switch and previews the
+settings radios before saving. `backend/tests/test_theme.py` covers the cookie, the account
+preference, the redirect guard, and the rendered attribute.
+
+The stylesheet is organised around semantic tokens (`--surface`, `--ink`, `--accent`,
+`--accent-solid`, `--on-accent`, `--focus-ring`, and the shadow roles) so a theme redefines
+roles rather than rules. Both palettes meet WCAG AA on the text they carry; the dark palette
+keeps the brand's pale green for emphasis and uses a near-white ink for body copy.
+
+Icon surfaces get their own roles so they sit with the rest of the palette instead of
+competing with it: `--icon-bg`/`--icon-ink` paint navigation and notification glyphs,
+`--avatar-bg`/`--avatar-ink` paint identity marks, and an unread notification swaps to
+`--signal-chip`/`--signal-ink` so the badge matches the row it belongs to rather than
+introducing a second accent. The rail's current page inverts its icon to a solid
+`--accent-solid` disc, so the selected item reads even where the rail tint is close to the page
+background. Every glyph pair clears 4.5:1 against its own disc in both themes.
+
+Smaller interface rules that came out of the same pass: the rail marks the current page with an
+inset accent bar as well as a tint, cards lift on hover instead of everywhere, buttons have a
+disabled state, headings balance their lines, focus rings come from a token that is visible on
+both surfaces, and `prefers-reduced-motion` turns the page-arrival animation off.
 
 ## Backend layout
 
@@ -44,7 +75,7 @@ backend/app/
 ├── models/                 # SQLAlchemy models per domain, re-exported from package root
 ├── schemas/                # Pydantic contracts for the JSON endpoints
 ├── services/               # authorization, communities, content helpers, messaging,
-│                           # notifications, updates, audit, outbox, idempotency
+│                           # call signaling, notifications, updates, audit, outbox, idempotency
 ├── templates/              # Jinja2 templates, grouped the way api/routes/ is
 │   ├── base.html           # the shell every page extends
 │   ├── partials/           # macros and fragments shared across pages
@@ -165,9 +196,9 @@ Ids in audit and outbox payloads are strings, and a payload carries only what a 
 
 ## Attachments
 
-Attachments extend conversations (Phase 8). Media on posts and comments is not part of this
-phase, and voice messages, transcoding, image derivatives, resumable uploads, and media in
-exports or email are deferred within it.
+Attachments extend conversations (Phase 8) and, since `0018_post_media`, a post's photos,
+video, and audio. Chat files and post media share one pipeline; what differs is the scope they
+are issued under, the ceilings that apply, and what happens to the bytes afterwards.
 
 The flow has three steps, and each enforces its own rule:
 
@@ -225,8 +256,175 @@ that look like a broken attachment rather than a configuration problem:
 Two deliberate boundaries: attachments are **not** end-to-end encrypted, because scanning and
 moderation need readable bytes (Decision 15) — they are encrypted at rest by the storage
 provider and access-controlled here; and a message carries text plus at most
-`ATTACHMENT_MESSAGE_LIMIT` attachments, because the message-body constraint predates media and
-an attachment-only message would need a schema change.
+`ATTACHMENT_MESSAGE_LIMIT` attachments. A message may be an attachment alone, with no text:
+`0014_attachment_only_messages` relaxed the body-length check, and the route still refuses a
+message that has neither.
+
+### Media on a post
+
+A post's media is issued against the author's **account** rather than a conversation, because
+the post that will own the file does not exist yet. `POST /posts/media` returns the same kind
+of short-lived target, the browser posts the bytes straight to storage, and
+`POST /attachments/{id}/finalize` verifies and scans them. `POST /posts` then binds the ids it
+was given, and refuses an upload that is not verified, not the caller's, already claimed, or
+issued for a conversation — so an upload cannot be walked from one scope into another. A draft
+the composer drops is released immediately by `DELETE /posts/media/{id}`; once a post names the
+file, only the post decides what happens to it.
+
+Three things make media usable rather than merely storable:
+
+- **The allowlist names containers, not just types.** `detect_family` reads the header: a JPEG,
+  PNG, GIF, or WEBP for images; `ftyp` for MP4 and M4A; EBML carrying a `webm` DocType for WebM;
+  `OggS`; a RIFF `WAVE`; and an ID3 or MPEG frame sync for MP3. The declared type must belong to
+  the detected family, which is what lets `video/mp4` and `audio/mp4` share one container
+  honestly instead of guessing between them from a header. Matroska is refused rather than
+  relabelled, because no browser plays it from this pipeline.
+- **Ceilings are per kind.** `POST_IMAGE_MAX_BYTES`, `POST_VIDEO_MAX_BYTES`, and
+  `POST_AUDIO_MAX_BYTES` (10 MB, 50 MB, 25 MB by default) apply at target issuance and again at
+  finalize against what actually arrived. The composer prints the same three numbers beside the
+  picker, from the same settings, so the page and the server cannot disagree. Chat attachments
+  keep the single `ATTACHMENT_MAX_BYTES` ceiling.
+- **Large files are never held whole.** An image is decoded and re-encoded, so it is buffered;
+  video and audio are read through `iter_chunks`, hashed on the way past, and streamed to the
+  scanner, so finalizing a 50 MB clip costs one pass and no 50 MB allocation. The same read path
+  answers `Range` requests, which is what makes seeking in a published video a 206 with a
+  `Content-Range` rather than a re-download.
+
+Read authorization follows the post, not the file. A personal update's media is readable by
+whoever `can_read_personal_post` admits — its author, its audience, and never a blocked pair —
+and a community post's media needs a visible community and a non-blocked author. A removed post
+answers 404 for its files even to its author, because the reason the post is gone should stay
+gone. Unlike a chat attachment, post media is **not** released once a reader has it: a chat file
+exists to be received by the people it was addressed to, while a post is read by whoever arrives
+later, so its bytes stay until the account removes them. That is also why the account quota was
+raised to 1 GB.
+
+A personal update may now be media alone. `0018_post_media` relaxed `ck_post_shape` so an empty
+body is legal; the route still refuses a post with neither text nor media, and duplicate
+detection only compares words, so two photo posts in a day are two posts rather than one sent
+twice.
+
+Still deferred: transcoding, image derivatives (such as a video's poster frame), resumable
+uploads, voice messages, and media in exports or email.
+
+## Calls
+
+A call is an extension of a conversation: 1:1 and group, audio or video, for the people
+already in that conversation. The caller presses the call control in the conversation header;
+every eligible participant gets an explicit **Answer**/**Decline** panel, and nothing ever
+auto-answers. Muting, switching the camera off, and leaving are per participant. Calls live in
+`calls` and `call_participants` (migration `0016_calls`) and are covered by
+`backend/tests/test_calls.py`.
+
+### What the server owns
+
+A call record exists before any SDP is exchanged, so every later packet is authorized against a
+row instead of against a client-chosen id. The state machine is `ringing -> accepted -> ended`,
+with `declined`, `missed`, `busy`, `failed`, and `cancelled` recorded as the end reason, and a
+per-participant outcome (`invited`, `joined`, `declined`, `left`, `missed`) with join and leave
+times. Ringing expires after `CALL_RING_TIMEOUT_SECONDS`; expiry is lazy, evaluated by the next
+call request in that conversation, and the caller's page also ends its own ring on the same
+timeout. When a call ends without a participant having answered, that participant gets a
+`call` notification ("Missed call from Alice") unless `notify_calls` is off.
+
+The page shows an `Answer`/`Decline` panel while ringing, then an in-call timer and the names of
+whoever is connected. Signaling rides the existing authenticated conversation WebSocket:
+`POST` sets the state, `/calls/ice` hands out ICE configuration, and `call_signal` packets carry
+offers, answers, and ICE candidates to one named participant. Each packet is authorized (both
+sides joined, same call, same conversation, no block between them), capped at 64 KB, and
+rate-limited per participant per call (`CALL_SIGNAL_LIMIT_PER_MINUTE`). An unreadable packet is ignored, so
+heartbeats and older clients keep working.
+
+### Confidentiality
+
+The application never receives call media. Group calls are a **mesh**: every participant holds
+one `RTCPeerConnection` per other participant, and each of those is its own DTLS-SRTP connection
+between two browsers. The server is not in the media path at all — there is no SFU, no relay it
+controls, and no recording path anywhere in the codebase. A TURN relay, when configured, sees
+only ciphertext it cannot read.
+
+Because the signaling channel is authenticated but not trusted with keys, every call shows
+**safety numbers** derived from the DTLS fingerprints that protect it (sorted, SHA-256, 16
+decimal digits, `static/js/safety-number.js`). A 1:1 call shows one number; a group call lists
+one per other participant, because each pair has its own keys. Both sides compute the same
+number, so comparing it out of band is what makes "nobody is in the middle" checkable rather
+than claimed. `backend/tests/test_safety_number.py` runs the shipped module under Node and
+shows that a fingerprint substituted during signaling changes the number.
+
+### Boundaries the server enforces
+
+- **Participation.** Only active conversation members can ring, accept, or be invited; anyone
+  else sees the same non-revealing 404 as a missing call.
+- **Blocks are absolute.** A blocked pair cannot ring each other, and blocking during a call
+  removes both accounts from it (ending a direct call, leaving a group call running for the
+  rest).
+- **Who can call me.** `accept_calls` in settings removes the account from new invites; the
+  setting never interrupts a call already in progress.
+- **Busy.** An account already joined to an open call is not invited, so a second call cannot
+  arrive on top of the first.
+- **Ceiling.** A call holds at most `CALL_MAX_PARTICIPANTS` (default 8) participants, checked at
+  ring time and again at join time, because a mesh costs each participant `n - 1` uplinks. A
+  group larger than the ceiling is refused with a clear message instead of being partially
+  invited. `CALL_CONCURRENT_LIMIT` caps open calls per worker, and `CALL_START_LIMIT_PER_MINUTE`
+  rate-limits ring attempts.
+- **Fair use.** Rounds are bounded in size, signals are bounded in number, and every refusal is
+  counted in `soccom_call_rejections_total`.
+
+### TURN
+
+`GET /calls/ice` returns `WEBRTC_ICE_SERVERS` (STUN by default) plus, when
+`WEBRTC_TURN_URLS` and `WEBRTC_TURN_SECRET` are set, short-lived TURN credentials in the coturn
+REST convention: username `"<expiry>:<user id>"`, credential `base64(HMAC-SHA1(secret,
+username))`, valid for `WEBRTC_TURN_TTL_SECONDS`. A TURN URL without a secret is not offered —
+a static credential is worse than no relay.
+
+For development, `docker compose --profile calls up -d` starts coturn with the shared secret
+`local-turn-secret`; set `WEBRTC_TURN_URLS=turn:localhost:3478?transport=udp` and
+`WEBRTC_TURN_SECRET=local-turn-secret` on the app. The Compose service uses host networking
+because a relay advertises the address it allocated on, and Docker Desktop does not implement
+host networking: on Windows or macOS use a hosted relay with the same shared secret, or run
+coturn natively. A public deployment terminates `turns:` over TLS and is sized by relay egress,
+which is the main cost driver once a relay exists.
+
+A relay-only path is an operator check rather than an automated one:
+
+1. point `WEBRTC_TURN_URLS` at the relay and call between two networks that cannot reach each
+   other directly (mobile data to a wired network is the usual reproduction);
+2. in `chrome://webrtc-internals` (or `about:webrtc` in Firefox), confirm the selected candidate
+   pair is `relay` on both sides;
+3. in the coturn log, confirm one allocation per participant and no key material or media;
+4. the safety numbers still match, and `soccom_call_signals_total` keeps rising while media
+   flows — the relay, not the application, is carrying the call.
+
+### Operational facts
+
+Metrics: `soccom_calls_started_total{media,kind}`, `soccom_calls_ended_total{reason}`,
+`soccom_call_signals_total{signal}`, `soccom_call_rejections_total{reason}`, plus the
+`soccom_calls_active` and `soccom_call_participants_joined` gauges and the
+`soccom_call_ring_duration_seconds` histogram (ring to first accept, the server's view of join
+latency). A client-reported connection failure lands in `soccom_calls_ended_total{reason="failed"}`,
+which is the drop rate; relay usage share belongs to the TURN server's own metrics, not the
+application. Media quality is a browser concern: the client samples `getStats` during video
+calls and turns the camera off after two consecutive samples above 15% packet loss, keeping
+audio.
+
+The conversation page is the only page whose `Permissions-Policy` allows the camera and
+microphone. A refused permission, a missing device, a device already in use, an unsupported
+browser, and a failed peer connection each have an explicit message; nothing silently falls back
+to another media kind. Closing the page, losing the socket, or dropping the last tab leaves the
+call on the server side too.
+
+Support matrix for the client: the current evergreen versions of Chrome, Edge, Firefox, and
+Safari. The mesh uses only `RTCPeerConnection`, `getUserMedia`, and DTLS-SRTP, so no
+encoded-transform support is required; one page per account takes part in a call. Group calls
+need one uplink per other participant, and iOS Safari suspends a call when its tab is
+backgrounded, which the app reports as a connection failure rather than pretending the call
+continues.
+
+**Deferred:** a selective forwarding unit with SFrame for ceilings above the mesh budget, live
+device switching, and multi-device call participation (one page per account takes part, as
+above). There is no server-side recording path in the codebase, and no client-side recording
+exists either.
 
 ## Personal updates
 

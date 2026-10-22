@@ -47,6 +47,30 @@ class ConversationSocketHub:
             except (WebSocketDisconnect, RuntimeError):
                 self.disconnect(conversation_id, websocket)
 
+    def is_connected(self, conversation_id: UUID, user_id: UUID) -> bool:
+        """True while this participant still has a page open on the conversation."""
+        return any(
+            connected_user_id == user_id
+            for _, connected_user_id in self.connections.get(conversation_id, [])
+        )
+
+    async def send_to_user(self, conversation_id: UUID, user_id: UUID, event: dict) -> bool:
+        """Deliver one event to a single participant's sockets.
+
+        Returns whether at least one socket accepted it, which is how call signaling tells a
+        ringing caller that the other side has no page open to answer on.
+        """
+        delivered = False
+        for websocket, connected_user_id in list(self.connections.get(conversation_id, [])):
+            if connected_user_id != user_id:
+                continue
+            try:
+                await websocket.send_json(event)
+                delivered = True
+            except (WebSocketDisconnect, RuntimeError):
+                self.disconnect(conversation_id, websocket)
+        return delivered
+
 
 conversation_sockets = ConversationSocketHub()
 

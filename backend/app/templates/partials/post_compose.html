@@ -1,20 +1,44 @@
 {# The composer for a personal update, rendered by the compose view. The audience decides who
-   the read rule lets in: the author always, and then whoever the choice names. #}
+   the read rule lets in: the author always, and then whoever the choice names.
+
+   The media field is progressive enhancement: the bytes go straight to object storage from
+   the browser, so without JavaScript nothing uploads and the hint says as much. The form
+   itself stays a plain post, and `attachment_ids` arrives as one repeated hidden field per
+   verified file. #}
 {% macro post_compose_errors(error) %}
-  {% if error == 'invalid-post' %}<p class="alert" role="alert">Write something before publishing, up to 10,000 characters.</p>{% endif %}
+  {% if error == 'invalid-post' %}<p class="alert" role="alert">Write something or attach a photo, video, or track before publishing, up to 10,000 characters of text.</p>{% endif %}
   {% if error == 'invalid-audience' %}<p class="alert" role="alert">Choose who can see this update.</p>{% endif %}
+  {% if error == 'invalid-media' %}<p class="alert" role="alert">One of those files could not be attached. Try adding it again.</p>{% endif %}
   {% if error == 'duplicate-post' %}<p class="alert" role="alert">You published this update in the last day.</p>{% endif %}
   {% if error == 'slow-down' %}<p class="alert" role="alert">You are publishing quickly. Wait a moment and try again.</p>{% endif %}
 {% endmacro %}
 
-{% macro post_compose(csrf_token, return_to, field_prefix, rows=4) %}
+{% macro post_compose(csrf_token, return_to, field_prefix, rows=4, media=none) %}
   <form method="post" action="/posts" class="post-compose">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="return_to" value="{{ return_to }}">
     <label for="{{ field_prefix }}-title">Title <span class="field-note">optional</span></label>
     <input id="{{ field_prefix }}-title" name="title" maxlength="140" placeholder="Give the update a headline">
     <label for="{{ field_prefix }}-body">Text</label>
-    <textarea id="{{ field_prefix }}-body" name="body" rows="{{ rows }}" maxlength="10000" required placeholder="Share something, then choose who reads it below."></textarea>
+    <textarea id="{{ field_prefix }}-body" name="body" rows="{{ rows }}" maxlength="10000" placeholder="Share something, then choose who reads it below."></textarea>
+    <div class="compose-media" data-media-picker
+         {% if media %}data-media-max-items="{{ media.max_items }}"
+         data-media-max-image="{{ media.image_max_bytes }}"
+         data-media-max-video="{{ media.video_max_bytes }}"
+         data-media-max-audio="{{ media.audio_max_bytes }}"
+         data-media-summary="{{ media.summary }}"{% endif %}>
+      <div class="compose-media-bar">
+        <input id="{{ field_prefix }}-media" class="visually-hidden" type="file" multiple
+               {% if media %}accept="{{ media.accept }}"{% endif %} data-media-input>
+        <label class="button button-quiet compose-media-add" for="{{ field_prefix }}-media">
+          <span class="material-symbols-rounded" aria-hidden="true">perm_media</span>Add photo, video, or audio
+        </label>
+        <span class="field-note" data-media-summary>{% if media %}{{ media.summary }}{% endif %}</span>
+      </div>
+      <p class="compose-media-status" role="status" data-media-status></p>
+      <ul class="compose-media-list" data-media-list></ul>
+      <noscript><p class="field-note">Attaching media needs JavaScript in this build. You can still publish text.</p></noscript>
+    </div>
     <label for="{{ field_prefix }}-audience">Who can see this</label>
     <select id="{{ field_prefix }}-audience" name="audience">
       <option value="followers" selected>Your followers</option>

@@ -141,7 +141,6 @@ class StubClamd:
 def storage(monkeypatch) -> FakeStorage:
     fake = FakeStorage()
     monkeypatch.setattr("app.services.attachments.get_storage", lambda: fake)
-    monkeypatch.setattr("app.api.routes.attachments.get_storage", lambda: fake)
     return fake
 
 

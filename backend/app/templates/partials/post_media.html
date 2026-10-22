@@ -1,0 +1,58 @@
+{# A post's media, rendered from the metadata the pipeline verified: nothing here is a storage
+   URL, every source goes back through the authorized download route, and each element is the
+   one its kind deserves — a gallery for photos, a player for a clip or a track, a link for
+   anything else. #}
+{% macro show_post_media(items) %}
+  {% if items %}
+    {% set images = items | selectattr('kind', 'equalto', 'image') | list %}
+    {% set others = items | rejectattr('kind', 'equalto', 'image') | list %}
+    <div class="post-media">
+      {% if images %}
+        <ul class="post-media-gallery{{ ' post-media-single' if images|length == 1 else '' }}">
+          {% for item in images %}
+            <li>
+              <a class="post-media-image" href="{{ item.download_url }}" target="_blank" rel="noopener">
+                <img src="{{ item.download_url }}" alt="{{ item.filename }}" loading="lazy" decoding="async">
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% for item in others %}
+        {% if item.kind == 'video' %}
+          <video class="post-media-video" controls playsinline preload="metadata"
+                 src="{{ item.download_url }}" aria-label="{{ item.filename }}"></video>
+        {% elif item.kind == 'audio' %}
+          <figure class="post-media-audio">
+            <figcaption>
+              <span class="material-symbols-rounded" aria-hidden="true">graphic_eq</span>
+              <span class="post-media-name">{{ item.filename }}</span>
+            </figcaption>
+            <audio controls preload="metadata" src="{{ item.download_url }}" aria-label="{{ item.filename }}"></audio>
+          </figure>
+        {% else %}
+          <a class="post-media-file" href="{{ item.download_url }}">
+            <span class="material-symbols-rounded" aria-hidden="true">description</span>
+            {{ item.filename }} · {{ (item.size_bytes / 1024)|round|int }} KB
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endmacro %}
+
+{# The feed's version: one thumbnail (or a kind glyph) and a count, linking to the post. #}
+{% macro show_media_peek(items, post_url, label) %}
+  {% if items %}
+    {% set images = items | selectattr('kind', 'equalto', 'image') | list %}
+    {% set lead = items[0] %}
+    <a class="post-media-peek" href="{{ post_url }}">
+      {% if images %}
+        <img src="{{ images[0].download_url }}" alt="" loading="lazy" decoding="async">
+      {% else %}
+        <span class="post-media-peek-glyph material-symbols-rounded" aria-hidden="true">{{ 'movie' if lead.kind == 'video' else 'graphic_eq' }}</span>
+      {% endif %}
+      <span>{{ label }}</span>
+    </a>
+  {% endif %}
+{% endmacro %}

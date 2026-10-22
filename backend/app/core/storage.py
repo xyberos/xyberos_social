@@ -16,7 +16,7 @@ The policy fixes the key, so a client cannot choose where its upload lands.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -29,6 +29,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+READ_CHUNK_SIZE = 64 * 1024
 
 
 class StorageError(RuntimeError):
@@ -146,6 +148,29 @@ class ObjectStorage:
             return response["Body"].read()
         except (BotoCoreError, ClientError) as error:
             raise StorageError(f"could not read object {key!r}") from error
+
+    def iter_chunks(
+        self, key: str, *, chunk_size: int = READ_CHUNK_SIZE, start: int = 0, length: int | None = None
+    ) -> Iterator[bytes]:
+        """Yield an object's bytes without holding it: the only read path for large media.
+
+        `start`/`length` ask the service for a byte range, which is what makes seeking in a
+        video a range read rather than a re-download of everything before it.
+        """
+        kwargs: dict[str, Any] = {"Bucket": self.bucket, "Key": key}
+        if start or length is not None:
+            end = "" if length is None else str(start + length - 1)
+            kwargs["Range"] = f"bytes={start}-{end}"
+        try:
+            body = self._client.get_object(**kwargs)["Body"]
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(f"could not read object {key!r}") from error
+        try:
+            yield from body.iter_chunks(chunk_size)
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(f"could not stream object {key!r}") from error
+        finally:
+            body.close()
 
     def put_bytes(self, key: str, payload: bytes, *, content_type: str) -> None:
         try:

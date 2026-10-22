@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/post_media.html" import show_media_peek %}
 {% block title %}Dashboard | Social+{% endblock %}
 {% block content %}
 <section class="dashboard-layout">
@@ -15,20 +16,14 @@
   <div class="dashboard-preferences">
     <p>
       {% if source == "people" %}Followed people{% elif source == "communities" %}Joined communities{% else %}Followed people and joined communities{% endif %}
-      <span>· Past {{ days }} days · {{ limit }} per batch</span>
     </p>
-    <!-- <a class="text-button" href="/settings"><span class="material-symbols-rounded" aria-hidden="true">tune</span>Change settings</a> -->
   </div>
-
-  <!-- <div class="dashboard-status" role="status">
-    <strong>{{ count }} posts in this batch</strong>
-    <span>Window ends {{ window_end.strftime("%Y-%m-%d %H:%M UTC") }}. Later posts are excluded.</span>
-  </div> -->
 
   {% if posts %}
     <div class="post-list">
       {% for post, author, community in posts %}
         {% set post_url = '/communities/' ~ community.slug ~ '/posts/' ~ post.id if community else '/posts/' ~ post.id %}
+        {% set post_media = media.get(post.id, []) if media else [] %}
         <article class="post-preview">
           <div class="post-head">
             <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
@@ -36,17 +31,20 @@
               <span class="post-author">{{ author.display_name }}</span>
               <p class="post-meta">
                 {% if community %}<a class="dashboard-community" href="/communities/{{ community.slug }}">{{ community.name }}</a>
-                {% else %}<span class="dashboard-community">Personal update</span>{% endif %}
-                <span>by @{{ author.username }}</span>
-                <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime("%Y-%m-%d %H:%M") }}</time>
+                {% endif %}
+                <!-- <span>@{{ author.username }}</span> -->
+                <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime("%d-%b-%y") }}</time>
               </p>
             </div>
           </div>
           {% if post.title %}
             <h3><a href="{{ post_url }}">{{ post.title }}</a></h3>
             {% if post.body %}<p>{{ post.body[:360] }}{% if post.body|length > 360 %}…{% endif %}</p>{% endif %}
-          {% else %}
+          {% elif post.body %}
             <p class="post-excerpt"><a href="{{ post_url }}">{{ post.body[:360] }}{% if post.body|length > 360 %}…{% endif %}</a></p>
+          {% endif %}
+          {% if post_media %}
+            {{ show_media_peek(post_media, post_url, post_media|length ~ (' file' if post_media|length == 1 else ' files')) }}
           {% endif %}
           <div class="post-actions">
             <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comment</a>

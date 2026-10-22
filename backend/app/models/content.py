@@ -31,6 +31,8 @@ class Post(Base):
 
     The two shapes are mutually exclusive and the database enforces which fields each one
     carries: a community post is titled, a personal update is text with an optional title.
+    A personal update's text may be empty, because media can be the whole update; the route
+    still refuses a post that has neither text nor media.
     """
 
     __tablename__ = "posts"
@@ -38,7 +40,7 @@ class Post(Base):
         CheckConstraint(
             "(community_id IS NOT NULL AND title IS NOT NULL"
             " AND length(title) BETWEEN 1 AND 140)"
-            " OR (community_id IS NULL AND length(body) BETWEEN 1 AND 10000)",
+            " OR (community_id IS NULL AND length(body) <= 10000)",
             name="ck_post_shape",
         ),
         CheckConstraint("title IS NULL OR length(title) <= 140", name="ck_post_title_length"),

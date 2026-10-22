@@ -9,6 +9,7 @@ from app.api.deps import authenticated_user, current_session
 from app.api.responses import render
 from app.core.database import get_db
 from app.models import Community, CommunityMembership, Post, User, UserRelationship
+from app.services import attachments as attachment_service
 from app.services.updates import decode_updates_cursor, encode_updates_cursor
 
 router = APIRouter()
@@ -144,6 +145,10 @@ def dashboard_page(
             "has_more": has_more,
             "next_cursor": next_cursor,
             "window_end": window_end,
+            # One query for the whole batch: a feed does not ask per post what it carries.
+            "media": attachment_service.post_media_payloads(
+                database, [post.id for post, _author, _community in page_rows]
+            ),
             # The shell's account menu logs out from a form, so every page it renders on needs
             # the token. This page has no form of its own, hence the explicit value.
             "csrf_token": current_session(request, database).csrf_token,

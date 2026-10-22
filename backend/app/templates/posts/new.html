@@ -7,11 +7,14 @@
   {{ page_heading('Publish an update', 'New post', 'A personal update reaches the readers you choose, and reads back on your dashboard.') }}
 
   {{ post_compose_errors(error) }}
-  {% call post_compose(csrf_token, '/posts/new', 'post-new', rows=6) %}
+  {% call post_compose(csrf_token, '/posts/new', 'post-new', rows=6, media=media) %}
     <div class="profile-actions">
       <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Publish</button>
       <a class="button button-quiet" href="/dashboard">Cancel</a>
     </div>
   {% endcall %}
 </section>
+{# Loaded from inside the swapped region: hx-boost replaces #main-content and never re-runs
+   the head, so a page-level script has to travel with the page it belongs to. #}
+<script defer src="/static/js/compose-media.js"></script>
 {% endblock %}

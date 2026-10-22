@@ -11,6 +11,8 @@ from app.models import User, UserSession
 from app.core.security import check_rate_limit, new_token, session_expiry, token_digest
 
 SESSION_COOKIE = "soccom_session"
+THEME_COOKIE = "soccom_theme"
+THEME_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 
 def client_key(request: Request) -> str:
@@ -36,6 +38,31 @@ def set_session_cookie(response: Response, raw_token: str) -> None:
 
 def session_cookie_name() -> str:
     return "__Host-soccom_session" if get_settings().cookie_secure else SESSION_COOKIE
+
+
+def theme_cookie_name() -> str:
+    return "__Host-soccom_theme" if get_settings().cookie_secure else THEME_COOKIE
+
+
+def set_theme_cookie(response: Response, theme: str) -> None:
+    """Remember the choice for signed-out pages on this device.
+
+    HttpOnly is deliberate: the page never needs to read it, because the server renders the
+    chosen theme into the document, and the toggle updates through a request.
+    """
+    response.set_cookie(
+        theme_cookie_name(),
+        theme,
+        max_age=THEME_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=get_settings().cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def theme_from_cookie(request: Request) -> str | None:
+    return request.cookies.get(theme_cookie_name())
 
 
 def current_session(request: Request | WebSocket, database: Session) -> UserSession | None:

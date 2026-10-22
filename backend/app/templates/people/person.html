@@ -46,7 +46,7 @@
                 <p class="post-meta"><time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span>Personal update</span></p>
               </div>
             </div>
-            <h3><a href="/posts/{{ post.id }}">{{ post.title or post.body[:80] }}</a></h3>
+            <h3><a href="/posts/{{ post.id }}">{{ post.title or post.body[:80] or 'Photo update' }}</a></h3>
             {% if post.title and post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
             <div class="post-actions">
               <a class="post-action" href="/posts/{{ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comments</a>

@@ -13,8 +13,10 @@ from app.api.deps import (
     form_context,
     require_csrf,
     session_cookie_name,
+    set_theme_cookie,
 )
-from app.api.responses import render
+from app.api.responses import relative_target, render
+from app.core.theme import THEME_CHOICES
 from app.core import events
 from app.core.database import get_db
 from app.core.scoping import account_scope
@@ -132,6 +134,33 @@ def update_profile(
     return RedirectResponse("/profile?saved=1", status_code=303)
 
 
+@router.post("/theme")
+def set_theme(
+    request: Request,
+    theme: str = Form(),
+    next: str | None = Form(default=None),
+    database: Session = Depends(get_db),
+):
+    """Remember a theme choice on this device, and on the account when there is one.
+
+    No CSRF token: the only effect is the caller's own display preference, and a cross-site
+    form can neither read the result nor gain anything from it. Every mutating route that
+    changes shared state keeps its token.
+    """
+    if theme not in THEME_CHOICES:
+        raise HTTPException(status_code=422, detail="Choose system, light, or dark.")
+    user = authenticated_user(request, database)
+    if user is not None and user.theme != theme:
+        user.theme = theme
+        database.commit()
+    if request.headers.get("X-Theme-Update") == "true":
+        response: Response = Response(status_code=204)
+    else:
+        response = RedirectResponse(relative_target(next) or "/", status_code=303)
+    set_theme_cookie(response, theme)
+    return response
+
+
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, database: Session = Depends(get_db)):
     user = authenticated_user(request, database)
@@ -154,6 +183,9 @@ def update_settings(
     quiet_mode: bool = Form(False),
     notify_replies: bool = Form(False),
     notify_moderation: bool = Form(False),
+    notify_calls: bool = Form(False),
+    accept_calls: bool = Form(False),
+    theme: str = Form("system"),
     csrf_token: str = Form(),
     database: Session = Depends(get_db),
 ):
@@ -162,11 +194,12 @@ def update_settings(
         updates_source not in {"all", "people", "communities"}
         or updates_days not in {1, 7, 30, 90}
         or updates_limit not in {1, 5, 10, 20, 50}
+        or theme not in THEME_CHOICES
     ):
         return render(
             request,
             "account/settings.html",
-            form_context(browser_session, user=user, error="Choose valid update defaults."),
+            form_context(browser_session, user=user, error="Choose valid settings."),
             status_code=422,
         )
     user.updates_source = updates_source
@@ -175,8 +208,14 @@ def update_settings(
     user.quiet_mode = quiet_mode
     user.notify_replies = notify_replies
     user.notify_moderation = notify_moderation
+    user.notify_calls = notify_calls
+    user.accept_calls = accept_calls
+    user.theme = theme
     database.commit()
-    return RedirectResponse("/settings?saved=1", status_code=303)
+    response = RedirectResponse("/settings?saved=1", status_code=303)
+    # Signing out keeps the same look on this device.
+    set_theme_cookie(response, theme)
+    return response
 
 
 @router.get("/account/export")

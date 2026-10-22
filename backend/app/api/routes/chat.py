@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import authenticated_form_user, authenticated_user, current_session, form_context
 from app.api.responses import redirect_people, render
 from app.core import events
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.scoping import conversation_scope
 from app.models import (
@@ -25,6 +26,7 @@ from app.core.security import check_rate_limit
 from app.services import idempotency
 from app.services.attachments import attach_to_message, attachment_payload
 from app.services.authorization import is_blocked_between
+from app.services.calls import leave_call_on_disconnect, relay_call_signal
 from app.services.messaging import (
     active_conversation_member,
     conversation_sockets,
@@ -380,7 +382,7 @@ def conversation_detail(
     membership.last_read_at = datetime.now(UTC)
     database.commit()
     browser_session = current_session(request, database)
-    return render(
+    response = render(
         request,
         "chat/conversation.html",
         {
@@ -402,9 +404,15 @@ def conversation_detail(
             ),
             "peer_read_at": peer_read_at,
             "events": events,
+            # Only the ICE servers are handed to the browser: media never visits the server,
+            # so this is the whole call configuration the client needs.
+            "ice_servers": get_settings().webrtc_ice_servers,
             "csrf_token": browser_session.csrf_token,
         },
     )
+    # Only this page can place a call, so only this page may ask for the camera and microphone.
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
+    return response
 
 
 @router.post("/conversations/{conversation_id}/members")
@@ -726,17 +734,32 @@ async def conversation_websocket(
     if browser_session is None or browser_session.user_id is None:
         await websocket.close(code=4401)
         return
-    member = database.get(ConversationMember, (conversation_id, browser_session.user_id))
+    user_id = browser_session.user_id
+    member = database.get(ConversationMember, (conversation_id, user_id))
     if member is None or member.left_at is not None:
         await websocket.close(code=4403)
         return
-    await conversation_sockets.connect(conversation_id, browser_session.user_id, websocket)
+    # End the read transaction before the socket idles, and start each packet from a fresh one.
+    database.rollback()
+    await conversation_sockets.connect(conversation_id, user_id, websocket)
     try:
         while True:
-            heartbeat = await websocket.receive_text()
-            if heartbeat == "ping":
+            packet = await websocket.receive_text()
+            if packet == "ping":
                 await websocket.send_text("pong")
+                continue
+            # Call signaling rides this same authenticated socket: offers, answers, and ICE
+            # candidates are authorized against the call record and forwarded to one peer.
+            sender = database.get(User, user_id)
+            if sender is not None:
+                await relay_call_signal(
+                    database, conversation_id=conversation_id, sender=sender, packet=packet
+                )
+            database.rollback()
     except WebSocketDisconnect:
         pass
     finally:
         conversation_sockets.disconnect(conversation_id, websocket)
+        # The socket is the only signaling path, so a participant whose last page closed has
+        # left the call whether or not the browser said so.
+        await leave_call_on_disconnect(database, conversation_id, user_id)

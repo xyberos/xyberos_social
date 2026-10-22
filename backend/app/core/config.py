@@ -33,10 +33,36 @@ class Settings(BaseSettings):
     s3_secret_access_key: str | None = None
     s3_use_path_style: bool = True
 
+    # ICE servers given to the browser for calls, comma separated. Media is peer-to-peer and
+    # never reaches the application, so these addresses are the entire media configuration the
+    # server hands out. STUN is enough on most home and mobile networks.
+    webrtc_ice_servers: str = "stun:stun.l.google.com:19302"
+    # TURN is the relay of last resort for peers behind symmetric NAT, and the relay forwards
+    # ciphertext it cannot read. Credentials are minted per session (coturn REST convention:
+    # username "<expiry>:<user id>", credential HMAC-SHA1 of the username), never static.
+    webrtc_turn_urls: str = ""
+    webrtc_turn_secret: str | None = None
+    webrtc_turn_ttl_seconds: int = 300
+
+    # Calls are a mesh: every participant holds one peer connection per other participant, so
+    # the ceiling is what keeps a call inside the per-worker socket and signaling budget.
+    call_max_participants: int = 8
+    call_concurrent_limit: int = 50
+    call_ring_timeout_seconds: int = 45
+    call_start_limit_per_minute: int = 10
+    call_signal_limit_per_minute: int = 240
+
     attachment_max_bytes: int = 10 * 1024 * 1024
     attachment_message_limit: int = 4
-    attachment_account_quota_bytes: int = 200 * 1024 * 1024
+    attachment_account_quota_bytes: int = 1024 * 1024 * 1024
     attachment_upload_ttl_seconds: int = 900
+
+    # A post carries media that outlives the first reader, so its ceilings are per kind
+    # rather than one number: a photo is small, a short video is not, and a song sits between.
+    post_media_limit: int = 4
+    post_image_max_bytes: int = 10 * 1024 * 1024
+    post_video_max_bytes: int = 50 * 1024 * 1024
+    post_audio_max_bytes: int = 25 * 1024 * 1024
 
     # Uploads are scanned before they can be downloaded. Leave unset to run the structural
     # validator only (type, size, and magic-byte checks) outside production.

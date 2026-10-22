@@ -79,7 +79,25 @@ Record these as short architecture decision records (ADRs), with a decision, alt
 14. **Client surface:** one server-rendered web application until workflows are validated. The monorepo `apps/` split (desktop, mobile, terminal) and Flutter clients stay deferred; domain code stays in one deployable backend using module boundaries.
 15. **Media storage and delivery:** object bytes live in S3-compatible object storage, never in PostgreSQL. PostgreSQL stores metadata only (owner, scope, object key, mime type, size, checksum, scan state, deletion state). Uploads are validated and scan-promoted before any download is possible, delivery is always access-checked, and possession of a URL is never treated as authorization. Attachments are explicitly **not** end-to-end encrypted, because server-side scanning and moderation require readable bytes; they are encrypted at rest and access-controlled instead.
 16. **Calling model (end-to-end encrypted):** calls are an extension of conversations, signaled over the existing authenticated WebSocket channel rather than a separate unauthenticated signaling surface. 1:1 calls are peer-to-peer — DTLS-SRTP directly between participants, with TURN used only as a ciphertext relay when direct connectivity fails. Group calls encrypt media client-side (SFrame over the WebRTC encoded-transform API) so the media server forwards frames it cannot decrypt. Keys are generated on participant devices, derived by ephemeral ECDH, ratcheted per sender, and rekeyed on every join and leave. The signaling channel is treated as untrusted, so the design is only honest when users can verify a per-call fingerprint. No server-side recording path exists in the codebase, no SFU is written in-house, and call metadata remains server-visible.
+
+   *Amendment, Phase 9 implementation:* group calls ship as a full mesh rather than through an
+   SFU with SFrame. Every participant holds one DTLS-SRTP connection per other participant, so
+   each pair is end-to-end encrypted exactly as a 1:1 call is, the application is not in the
+   media path at all, no media server has to be trusted or operated, and no SFrame
+   implementation (or vetted third-party library) is required. The cost moves to the
+   participants: each one carries `n - 1` uplinks and encodes `n - 1` streams, which is why the
+   ceiling stays small (Decision 17). SFrame over a selective forwarding unit remains the
+   documented path if a ceiling above the mesh budget is ever needed; it is not a configuration
+   change, and it would not be adopted without a reviewed implementation and a confidentiality
+   test of the relayed frames.
 17. **Group call ceiling:** group calls are capped at a configured maximum participant count, enforced server-side at ring time and again at join time, set to the minimum of the per-worker authenticated WebSocket connection budget, the per-participant signaling rate budget, and the media server's E2EE room limit. Concurrent group calls per worker are capped as well, and the ceiling is published as a per-worker guarantee because it cannot be enforced globally until shared WebSocket fan-out exists. Raising it requires shared fan-out plus a larger E2EE-capable media server — not a configuration change alone.
+
+   *Amendment, Phase 9 implementation:* with a mesh topology the binding constraint is the
+   participant's uplink and the per-worker socket budget, not an E2EE room limit. The default
+   ceiling is 8 participants and the default per-worker cap is 50 open calls
+   (`CALL_MAX_PARTICIPANTS`, `CALL_CONCURRENT_LIMIT`); both are enforced at ring time and again
+   at join time, with an in-process occupancy registry that is pruned against the call records.
+   The published guarantee is still per worker, because signaling fan-out is process-local.
 
 Object storage (Phase 8) and an E2EE-capable TURN/media-server path (Phase 9) are the only infrastructure dependencies this plan accepts up front, because those features cannot exist without them; keep storage S3-compatible and the media path provider-neutral. The remaining vendor choices — search engine, event bus, CDN — stay open until a measured need appears. Payments is the other real dependency: the provider contract should be chosen before the transaction phases.
 
@@ -226,7 +244,7 @@ These are small, additive changes to the shipped social core that keep Phases 10
 
 ### Phase 8: Media and file attachments
 
-**Status:** Landed in migration `0011_attachments` and `backend/tests/test_attachments.py`, which covers the exit criteria below. Deferred within this phase, as listed at the end of this section: post and comment media, voice messages, transcoding and adaptive streaming, image derivatives, resumable uploads, and media in exports or email.
+**Status:** Landed in migration `0011_attachments` and `backend/tests/test_attachments.py`, which covers the exit criteria below. Post media landed in `0018_post_media` with `backend/tests/test_post_media.py`: a post carries photos, video, and audio, with per-kind ceilings, streaming finalize, and range-aware delivery. Still deferred within this phase, as listed at the end of this section: comment media, voice messages, transcoding and adaptive streaming, image derivatives, resumable uploads, and media in exports or email.
 
 **Deliverables:** an object-storage-backed attachment pipeline, attachments in direct and small-group conversations, and reuse of the same pipeline for post and comment media once chat proves it.
 
@@ -241,14 +259,15 @@ These are small, additive changes to the shipped social core that keep Phases 10
 - Delete objects with their content. Message deletion, moderation removal, and account deletion revoke or remove the object and its derivatives per the retention ADR, while noting that operator backups are not rewritten.
 - Extend the messaging contract: attachment metadata is persisted and broadcast only after the object is finalized and scan-clean; the client shows upload progress, retries on failure, and never autoplays audio or video attachments inline.
 - State the deliberate boundary in code and docs: attachments are not end-to-end encrypted, because scanning and moderation require readable bytes (Decision 15). Do not describe attachments with the confidentiality language used for calls.
+- *Post media (amendment).* A post's files follow the same three steps but are issued against the author's account, because the post does not exist yet, and `POST /posts` binds them while refusing an upload that is unverified, foreign, already claimed, or issued for a conversation. Three rules differ from chat: the allowlist compares the declared type against a detected container **family** (`ftyp` covers MP4 and M4A, EBML must carry a `webm` DocType, RIFF must say `WAVE`), so the declaration is checked rather than guessed; ceilings are per kind (`POST_IMAGE_MAX_BYTES`, `POST_VIDEO_MAX_BYTES`, `POST_AUDIO_MAX_BYTES`) and the composer prints the same numbers from the same settings; and video and audio are finalized by one streaming pass — read in chunks, hashed on the way, streamed to the scanner — with the same read path answering `Range` requests so seeking is a 206 rather than a download. Read authorization is the post's own rule (`can_read_personal_post`, community visibility, blocks), a removed post 404s its files even for its author, and post media is never released on delivery because a post is read by whoever arrives later. A personal update may be media alone.
 
 **Exit criteria:** only authorized participants can download an attachment, proven by tests that attempt direct object access, guessable keys, and cross-conversation reads; `PENDING` and `REJECTED` objects are never downloadable; declared-type spoofing, oversize uploads, and quota exhaustion are rejected server-side and cannot be bypassed by a modified client; replayed finalize calls do not create duplicates; deleting a message or an account removes access to the underlying object.
 
-**Deferred within this phase:** voice messages, video transcoding and adaptive streaming, image derivatives and CDN optimization, resumable multipart uploads, and media inside emails or account exports.
+**Deferred within this phase:** comment media, voice messages, video transcoding and adaptive streaming, image derivatives and CDN optimization, resumable multipart uploads, and media inside emails or account exports.
 
 ### Phase 9: Audio and video calling
 
-**Status:** Not started. Depends on Phase 8 for the media pipeline conventions and on the Phase 4 WebSocket channel for signaling. End-to-end encryption (Decision 16) and the group ceiling (Decision 17) are prerequisites, not follow-ups: the topology, key handling, and admission control are decided and tested as part of this phase.
+**Status:** Implemented for the in-repository surface. Call records and the ring/join/leave state machine live in migration `0016_calls`; 1:1 and mesh group audio and video calls are signaled over the conversation WebSocket; blocks, `accept_calls`, busy, the participant ceiling, the per-worker call cap, and signaling rate limits are enforced server-side; TURN credentials are minted per session with a coturn Compose profile and a documented relay-only check; missed calls notify; safety numbers are derived per pair and the derivation is tested under Node, including a substituted fingerprint; and metrics (including ring-to-accept latency) plus the explicit browser states are documented in the README and covered by `backend/tests/test_calls.py`. The mesh topology replaces the SFU/SFrame design for group calls as an amendment to Decision 16. Still open: a ceiling above the mesh budget (SFU plus SFrame), an operator's relay-only run against a deployed TURN server, and multi-device participation.
 
 **Deliverables:** end-to-end-encrypted 1:1 audio and video calls between conversation participants; group calls with an enforced participant ceiling and client-side media encryption; persisted call records with missed-call notifications; a documented TURN/media-server deployment; and a tested browser support matrix.
 

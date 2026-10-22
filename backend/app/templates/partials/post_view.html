@@ -1,8 +1,10 @@
 {# One post view for both kinds of post. A personal update and a community post differ in the
    byline, the wording of a removal, and the actions the reader may take — everything else,
    including the comment thread, is shared. `author_url` is optional: a community post shows
-   the handle as text because the thread already names the community it belongs to. #}
-{% macro show_post_card(post, author, community, author_url) %}
+   the handle as text because the thread already names the community it belongs to. `media`
+   is the verified attachment list for the post, which a personal update may carry. #}
+{% from "partials/post_media.html" import show_post_media %}
+{% macro show_post_card(post, author, community, author_url, media=none) %}
   <article class="thread-post">
     <div class="post-head">
       <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
@@ -22,6 +24,7 @@
     {% else %}
       {% if post.title %}<h1>{{ post.title }}</h1>{% endif %}
       {% if post.body %}<p class="thread-body">{{ post.body }}</p>{% endif %}
+      {{ show_post_media(media or []) }}
     {% endif %}
     {{ caller() }}
   </article>

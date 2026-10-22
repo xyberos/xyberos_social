@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     account,
     attachments,
+    calls,
     chat,
     communities,
     content,
@@ -14,6 +15,7 @@ from app.api.routes import (
     notifications,
     pages,
     people,
+    post_media,
 )
 
 api_router = APIRouter()
@@ -25,6 +27,8 @@ for route_module in (
     people,
     chat,
     attachments,
+    post_media,
+    calls,
     communities,
     content,
     moderation,

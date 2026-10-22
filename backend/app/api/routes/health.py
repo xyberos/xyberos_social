@@ -10,6 +10,7 @@ from app.core.database import engine, get_db
 from app.core.metrics import gauge, registry, uptime_seconds
 from app.models import IdempotencyKey, OutboxEvent
 from app.services.attachments import pending_upload_count
+from app.services.calls import active_call_totals
 
 router = APIRouter()
 
@@ -117,6 +118,21 @@ def metrics(database: Session = Depends(get_db)):
                 "soccom_attachments_unverified",
                 "Attachments issued or uploaded but not yet verified by a scan.",
                 [({}, float(pending_upload_count(database)))],
+            )
+        )
+        open_calls, joined_participants = active_call_totals(database)
+        blocks.append(
+            gauge(
+                "soccom_calls_active",
+                "Calls ringing or in progress.",
+                [({}, float(open_calls))],
+            )
+        )
+        blocks.append(
+            gauge(
+                "soccom_call_participants_joined",
+                "Participants currently joined to an open call.",
+                [({}, float(joined_participants))],
             )
         )
     except SQLAlchemyError:

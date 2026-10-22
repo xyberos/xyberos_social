@@ -1,5 +1,6 @@
 import itertools
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -41,16 +42,23 @@ def client_factory(database_factory):
     app.dependency_overrides[get_db] = override_get_db
     test_clients = []
 
-    def create_client():
-        client_number = next(_test_client_counter)
-        test_client = TestClient(
-            app,
-            client=(f"198.18.{client_number // 254}.{client_number % 254 + 1}", 50000),
-        )
-        test_clients.append(test_client)
-        return test_client
+    # Every client in one test shares a single event loop, the way the one server process they
+    # are talking to does. Without this each TestClient runs its own loop, so a websocket
+    # relay from one client's socket to another's would have to cross loops.
+    with anyio.from_thread.start_blocking_portal() as portal:
 
-    yield create_client
+        def create_client():
+            client_number = next(_test_client_counter)
+            test_client = TestClient(
+                app,
+                client=(f"198.18.{client_number // 254}.{client_number % 254 + 1}", 50000),
+            )
+            test_client.portal = portal
+            test_clients.append(test_client)
+            return test_client
+
+        yield create_client
+
     for test_client in test_clients:
         test_client.close()
     app.dependency_overrides.clear()
