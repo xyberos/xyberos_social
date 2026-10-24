@@ -16,11 +16,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import authenticated_form_user, authenticated_user
 from app.core.database import get_db
+from app.core.media import THUMBNAIL_MIME
 from app.core.scoping import conversation_scope
 from app.core.security import check_rate_limit
 from app.core.storage import StorageError
 from app.models import User
-from app.schemas.attachments import UploadTargetRequest, UploadTargetResponse
+from app.schemas.attachments import (
+    MultipartCompleteRequest,
+    UploadTargetRequest,
+)
 from app.services import attachments as attachment_service
 from app.services import idempotency
 from app.services.messaging import active_conversation_member
@@ -31,12 +35,28 @@ UPLOAD_LIMIT = 20
 DOWNLOAD_LIMIT = 240
 RATE_WINDOW_SECONDS = 60
 
+# Attachment bytes never change after finalize: the object key is per attachment and the
+# content is verified against a checksum. A long private lifetime lets a reader's browser (and
+# the local attachment cache) answer a repeat view without a single byte leaving storage.
+ATTACHMENT_CACHE_CONTROL = "private, max-age=86400, immutable"
+
 
 def _signed_in(request: Request, database: Session) -> User:
     user = authenticated_user(request, database)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     return user
+
+
+def _etag_matches(header: str, etag: str) -> bool:
+    """Compare an `If-None-Match` header, which may list several tags or use the weak form."""
+    for candidate in header.split(","):
+        candidate = candidate.strip()
+        if candidate.startswith("W/"):
+            candidate = candidate[2:]
+        if candidate == "*" or candidate == etag:
+            return True
+    return False
 
 
 @router.post("/conversations/{conversation_id}/attachments", status_code=201)
@@ -69,6 +89,7 @@ def create_attachment_target(
                 payload.content_type.strip().lower(),
                 payload.size_bytes,
                 payload.filename,
+                payload.checksum_sha256 or "",
             ),
         )
         if reservation.replay is not None and reservation.replay.body is not None:
@@ -84,15 +105,9 @@ def create_attachment_target(
         declared_mime_type=payload.content_type,
         size_bytes=payload.size_bytes,
         filename=payload.filename,
+        checksum_sha256=payload.checksum_sha256,
     )
-    body = UploadTargetResponse(
-        attachment_id=str(target.attachment_id),
-        upload_url=target.upload_url,
-        fields=target.fields,
-        expires_in=target.expires_in,
-        max_bytes=target.max_bytes,
-        max_attachments=target.max_attachments,
-    ).model_dump()
+    body = attachment_service.upload_target_payload(target).model_dump()
     if reservation is not None:
         idempotency.complete(database, reservation, status_code=201, body=body)
     database.commit()
@@ -165,9 +180,15 @@ def download_attachment(
             f"filename*=UTF-8''{quote(attachment.original_filename)}"
         ),
         "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, max-age=300",
+        "Cache-Control": ATTACHMENT_CACHE_CONTROL,
         "Accept-Ranges": "bytes",
     }
+    etag = f'"{attachment.checksum_sha256}"' if attachment.checksum_sha256 else None
+    if etag:
+        headers["ETag"] = etag
+        # Revalidation is how a cached copy is proven current without resending the bytes.
+        if _etag_matches(request.headers.get("if-none-match", ""), etag):
+            return Response(status_code=304, headers=headers)
     if media.inline:
         headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
 
@@ -193,3 +214,82 @@ def download_attachment(
         raise HTTPException(
             status_code=503, detail="The attachment is temporarily unavailable."
         ) from None
+
+
+@router.get("/attachments/{attachment_id}/thumbnail")
+def download_thumbnail(
+    attachment_id: UUID,
+    request: Request,
+    database: Session = Depends(get_db),
+):
+    """Serve the small preview derivative under the same authorization as the original.
+
+    A preview is what a bubble or a feed tile renders, so this route is the one that keeps a
+    page of media from costing a page of originals. The original is still what a reader
+    downloads, and still what releases the stored copy.
+    """
+    user = _signed_in(request, database)
+    if not check_rate_limit(
+        f"attachment:{user.id}", "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
+    ):
+        raise HTTPException(status_code=429, detail="Too many downloads. Try again in a moment.")
+    attachment = attachment_service.attachment_for_download(
+        database, attachment_id=attachment_id, user=user
+    )
+    if not attachment.thumbnail_key:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+
+    headers = {
+        "Content-Disposition": "inline",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": ATTACHMENT_CACHE_CONTROL,
+    }
+    if attachment.checksum_sha256:
+        etag = f'"{attachment.checksum_sha256}-preview"'
+        headers["ETag"] = etag
+        if _etag_matches(request.headers.get("if-none-match", ""), etag):
+            return Response(status_code=304, headers=headers)
+
+    try:
+        stream = attachment_service.open_thumbnail(attachment)
+    except StorageError:
+        raise HTTPException(
+            status_code=503, detail="The attachment is temporarily unavailable."
+        ) from None
+    return StreamingResponse(stream, media_type=THUMBNAIL_MIME, headers=headers)
+
+
+@router.post("/attachments/{attachment_id}/multipart")
+def start_attachment_multipart(
+    attachment_id: UUID,
+    request: Request,
+    database: Session = Depends(get_db),
+):
+    """Open or resume the part session for a large upload.
+
+    Asking twice returns the same upload id, so a client that lost its connection can carry
+    on with the parts it already delivered instead of sending the whole file again.
+    """
+    user = _signed_in(request, database)
+    session = attachment_service.start_multipart(
+        database, attachment_id=attachment_id, user=user
+    )
+    return attachment_service.multipart_session_payload(session)
+
+
+@router.post("/attachments/{attachment_id}/multipart/complete")
+def complete_attachment_multipart(
+    attachment_id: UUID,
+    payload: MultipartCompleteRequest,
+    request: Request,
+    database: Session = Depends(get_db),
+):
+    """Assemble the uploaded parts, then verify and scan the result."""
+    user = _signed_in(request, database)
+    attachment = attachment_service.complete_multipart(
+        database,
+        attachment_id=attachment_id,
+        user=user,
+        parts=[(part.number, part.etag) for part in payload.parts],
+    )
+    return attachment_service.attachment_payload(attachment)

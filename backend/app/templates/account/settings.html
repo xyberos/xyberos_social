@@ -8,6 +8,7 @@
   {% endcall %}
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
   {% if saved %}<p class="success" role="status">Settings saved.</p>{% endif %}
+  {% if password_changed %}<p class="success" role="status">Password updated. Other devices were signed out.</p>{% endif %}
   <form method="post" action="/settings" class="settings-form settings-preferences">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <section class="settings-section" aria-labelledby="dashboard-settings-title">
@@ -78,6 +79,30 @@
     </section>
     <button class="button button-primary settings-save" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save settings</button>
   </form>
+
+  <section class="settings-section" aria-labelledby="password-settings-title">
+    <div class="section-heading">
+      <p class="eyebrow">Your sign-in</p>
+      <h2 id="password-settings-title">Change password</h2>
+    </div>
+    <form method="post" action="/account/password" class="settings-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if password_error %}<p class="alert" role="alert">{{ password_error }}</p>{% endif %}
+      <div class="settings-fields">
+        <label>Current password
+          <input type="password" name="current_password" autocomplete="current-password" required>
+        </label>
+        <label>New password
+          <input type="password" name="new_password" autocomplete="new-password" minlength="12" required>
+        </label>
+        <label>Confirm new password
+          <input type="password" name="new_password_confirmation" autocomplete="new-password" minlength="12" required>
+        </label>
+      </div>
+      <p class="account-copy">At least 12 characters. Changing it signs out every other device and retires any unused reset link. If you have forgotten the current password, <a href="/forgot-password">reset it by email</a> instead.</p>
+      <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">key</span>Update password</button>
+    </form>
+  </section>
 
   <section class="settings-section settings-data" aria-labelledby="account-data-title">
     <div class="section-heading">

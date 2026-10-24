@@ -1,5 +1,7 @@
 """Profile, preferences, and the account data lifecycle."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -170,7 +172,12 @@ def settings_page(request: Request, database: Session = Depends(get_db)):
     return render(
         request,
         "account/settings.html",
-        form_context(browser_session, user=user, saved=request.query_params.get("saved")),
+        form_context(
+            browser_session,
+            user=user,
+            saved=request.query_params.get("saved"),
+            password_changed=request.query_params.get("password"),
+        ),
     )
 
 
@@ -216,6 +223,73 @@ def update_settings(
     # Signing out keeps the same look on this device.
     set_theme_cookie(response, theme)
     return response
+
+
+@router.post("/account/password")
+def change_password(
+    request: Request,
+    current_password: str = Form(),
+    new_password: str = Form(),
+    new_password_confirmation: str = Form(),
+    csrf_token: str = Form(),
+    database: Session = Depends(get_db),
+) -> Response:
+    """Change the password of the signed-in account.
+
+    The current password is required even though the session is already authenticated: it is
+    what stops a borrowed tab from becoming a permanent takeover. A successful change signs
+    out every other session and retires any unused reset link, because both were obtained
+    with the old credential.
+    """
+    user, browser_session = authenticated_form_user(request, database, csrf_token)
+    if not allow_request(request, "change-password"):
+        return _password_rejected(
+            request, browser_session, user, "Too many attempts. Try again later.", 429
+        )
+    if not verify_password(current_password, user.password_hash):
+        return _password_rejected(
+            request, browser_session, user, "The current password is incorrect.", 403
+        )
+    if verify_password(new_password, user.password_hash):
+        return _password_rejected(
+            request, browser_session, user, "Choose a password that differs from the current one."
+        )
+    # The same floor the reset flow applies: both forms are setting a replacement credential.
+    if len(new_password) < 12 or len(new_password.encode("utf-8")) > 128:
+        return _password_rejected(
+            request, browser_session, user, "Use a password between 12 and 128 bytes."
+        )
+    if new_password != new_password_confirmation:
+        return _password_rejected(request, browser_session, user, "New passwords do not match.")
+
+    user.password_hash = hash_password(new_password)
+    database.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: datetime.now(UTC)})
+    # This session stays signed in; every other device must prove the new password.
+    database.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.id != browser_session.id,
+    ).delete(synchronize_session=False)
+    database.commit()
+    return RedirectResponse("/settings?password=1", status_code=303)
+
+
+def _password_rejected(
+    request: Request,
+    browser_session: UserSession,
+    user: User,
+    message: str,
+    status_code: int = 422,
+) -> Response:
+    # The message is rendered beside the password form rather than at the top of a long page.
+    return render(
+        request,
+        "account/settings.html",
+        form_context(browser_session, user=user, password_error=message),
+        status_code=status_code,
+    )
 
 
 @router.get("/account/export")

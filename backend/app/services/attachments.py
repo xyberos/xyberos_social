@@ -12,8 +12,9 @@ instead of starting over.
 
 import hashlib
 import logging
+import re
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -28,11 +29,13 @@ from app.core.media import (
     DOCUMENT,
     IMAGE,
     MEDIA_CONTENT_TYPES,
+    THUMBNAIL_MIME,
     VIDEO,
     MediaType,
     UnsupportedMedia,
     is_accepted,
     kind_for,
+    render_thumbnail,
     strip_image_metadata,
 )
 from app.core.scanning import ScanUnavailable, ScanVerdict, get_scanner
@@ -47,7 +50,13 @@ from app.models import (
     User,
 )
 from app.models.attachments import PENDING_SCAN, PENDING_UPLOAD, REJECTED, SCANNED
-from app.schemas.attachments import AttachmentPayload
+from app.schemas.attachments import (
+    AttachmentPayload,
+    MultipartPartPayload,
+    MultipartPlanPayload,
+    MultipartSessionResponse,
+    UploadTargetResponse,
+)
 from app.services.authorization import (
     can_read_personal_post,
     community_role,
@@ -61,6 +70,27 @@ REAP_BATCH = 50
 FILENAME_LIMIT = 200
 # Enough of a container to name it, matching the scanner's sample size.
 SNIFF_BYTES = 512 * 1024
+# S3 refuses a smaller part than this, and the last part of an upload is the only one that
+# may be shorter.
+MIN_PART_BYTES = 5 * 1024 * 1024
+CHECKSUM_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True)
+class MultipartPlan:
+    """What the client needs to split its file: how large a part is, and how many there are."""
+
+    part_size: int
+    part_count: int
+
+
+@dataclass(frozen=True)
+class MultipartSession:
+    upload_id: str
+    part_size: int
+    # One entry per part: number, offset in the file, size of this part, and its URL.
+    parts: list[dict[str, int | str]] = field(default_factory=list)
+    expires_in: int = 0
 
 
 @dataclass(frozen=True)
@@ -71,6 +101,10 @@ class UploadTarget:
     expires_in: int
     max_bytes: int
     max_attachments: int
+    # True when the bytes were already in storage and were copied server-side, so the client
+    # has nothing to send.
+    reused: bool = False
+    multipart: MultipartPlan | None = None
 
 
 def _megabytes(value: int) -> int:
@@ -169,6 +203,55 @@ def object_key(scope: Scope, attachment_id: UUID) -> str:
     return f"attachments/{scope.kind}/{tenant}/{attachment_id}"
 
 
+def thumbnail_key(object_key_value: str) -> str:
+    """The derivative lives beside its original, so one attachment id names both."""
+    return f"{object_key_value}/thumb.webp"
+
+
+def multipart_part_plan(size_bytes: int) -> MultipartPlan | None:
+    """How a file of this size is split, or `None` when one request carries it."""
+    settings = get_settings()
+    if size_bytes < settings.attachment_multipart_threshold_bytes:
+        return None
+    part_size = max(MIN_PART_BYTES, settings.attachment_multipart_part_bytes)
+    return MultipartPlan(part_size=part_size, part_count=-(-size_bytes // part_size))
+
+
+def normalize_checksum(candidate: str | None) -> str | None:
+    """Accept a lowercase SHA-256 hex digest and nothing else: the value is a lookup key."""
+    value = (candidate or "").strip().lower()
+    return value if CHECKSUM_PATTERN.match(value) else None
+
+
+def upload_target_payload(target: UploadTarget) -> UploadTargetResponse:
+    """The wire shape shared by a chat attachment target and a post media target."""
+    return UploadTargetResponse(
+        attachment_id=str(target.attachment_id),
+        upload_url=target.upload_url,
+        fields=target.fields,
+        expires_in=target.expires_in,
+        max_bytes=target.max_bytes,
+        max_attachments=target.max_attachments,
+        reused=target.reused,
+        multipart=(
+            MultipartPlanPayload(
+                part_size=target.multipart.part_size, part_count=target.multipart.part_count
+            )
+            if target.multipart is not None
+            else None
+        ),
+    )
+
+
+def multipart_session_payload(session: MultipartSession) -> MultipartSessionResponse:
+    return MultipartSessionResponse(
+        upload_id=session.upload_id,
+        part_size=session.part_size,
+        expires_in=session.expires_in,
+        parts=[MultipartPartPayload(**part) for part in session.parts],
+    )
+
+
 def quota_used(database: Session, owner_user_id: UUID) -> int:
     """Bytes this account has stored, counting what is verified and what is still being scanned."""
     total = database.scalar(
@@ -189,6 +272,7 @@ def issue_upload_target(
     declared_mime_type: str,
     size_bytes: int,
     filename: str = "",
+    checksum_sha256: str | None = None,
 ) -> UploadTarget:
     settings = get_settings()
     declared = (declared_mime_type or "").strip().lower()
@@ -210,6 +294,20 @@ def issue_upload_target(
         )
 
     reap_expired_uploads(database)
+
+    checksum = normalize_checksum(checksum_sha256)
+    if checksum is not None:
+        reused = _copy_existing_upload(
+            database,
+            user=user,
+            scope=scope,
+            declared=declared,
+            size_bytes=size_bytes,
+            filename=filename,
+            checksum=checksum,
+        )
+        if reused is not None:
+            return reused
 
     settings_expiry = datetime.now(UTC) + timedelta(seconds=settings.attachment_upload_ttl_seconds)
     attachment_id = uuid4()
@@ -242,7 +340,140 @@ def issue_upload_target(
         expires_in=settings.attachment_upload_ttl_seconds,
         max_bytes=ceiling,
         max_attachments=max_items_for(scope.kind),
+        multipart=multipart_part_plan(size_bytes),
     )
+
+
+def _copy_existing_upload(
+    database: Session,
+    *,
+    user: User,
+    scope: Scope,
+    declared: str,
+    size_bytes: int,
+    filename: str,
+    checksum: str,
+) -> UploadTarget | None:
+    """Answer a repeat upload with a server-side copy of bytes this account already stored.
+
+    The checksum, the declared type, and the size must all match, and the source must be this
+    account's own verified, unexpired file. Only the storage service moves the bytes, so the
+    client link carries nothing at all. The copy is a separate object rather than a shared
+    one: each attachment is still deleted on its own terms, so release, moderation, and account
+    deletion stay exactly as they were.
+
+    A copy that storage refuses (a lost object, an unavailable service) is not an error the
+    uploader caused, so the caller falls back to issuing an ordinary target.
+    """
+    source = database.scalar(
+        select(Attachment)
+        .where(
+            Attachment.owner_user_id == user.id,
+            Attachment.source_checksum_sha256 == checksum,
+            Attachment.declared_mime_type == declared,
+            Attachment.declared_size_bytes == size_bytes,
+            Attachment.scan_state == SCANNED,
+            Attachment.deleted_at.is_(None),
+        )
+        .order_by(Attachment.created_at.desc())
+        .limit(1)
+    )
+    if source is None:
+        return None
+
+    settings = get_settings()
+    attachment_id = uuid4()
+    key = object_key(scope, attachment_id)
+    storage = get_storage()
+    try:
+        storage.copy_object(source.object_key, key, content_type=declared)
+        derived = None
+        if source.thumbnail_key:
+            derived = thumbnail_key(key)
+            storage.copy_object(
+                source.thumbnail_key, derived, content_type=THUMBNAIL_MIME
+            )
+    except StorageError:
+        try:
+            storage.delete(key)
+        except StorageError:
+            logger.warning(
+                "could not clean up a partial deduplicated copy",
+                extra={"event": "attachment.dedupe_cleanup_failed", "key": key},
+            )
+        logger.warning(
+            "could not copy an already-stored attachment",
+            extra={"event": "attachment.dedupe_copy_failed", "source_id": str(source.id)},
+        )
+        return None
+
+    now = datetime.now(UTC)
+    database.add(
+        Attachment(
+            id=attachment_id,
+            owner_user_id=user.id,
+            object_key=key,
+            thumbnail_key=derived,
+            original_filename=clean_filename(filename),
+            declared_mime_type=declared,
+            detected_mime_type=source.detected_mime_type,
+            declared_size_bytes=size_bytes,
+            size_bytes=source.size_bytes,
+            source_checksum_sha256=checksum,
+            checksum_sha256=source.checksum_sha256,
+            # Identical bytes with an identical verdict: the scan result is the source's, and
+            # running it twice would only cost a second read.
+            scan_state=SCANNED,
+            scan_detail=source.scan_detail,
+            uploaded_at=now,
+            finalized_at=now,
+            **scope.columns(),
+        )
+    )
+    database.flush()
+    logger.info(
+        "deduplicated an upload",
+        extra={
+            "event": "attachment.deduplicated",
+            "attachment_id": str(attachment_id),
+            "source_id": str(source.id),
+            "bytes": size_bytes,
+        },
+    )
+    return UploadTarget(
+        attachment_id=attachment_id,
+        upload_url="",
+        fields={},
+        expires_in=settings.attachment_upload_ttl_seconds,
+        max_bytes=media_ceiling(declared, scope_kind=scope.kind),
+        max_attachments=max_items_for(scope.kind),
+        reused=True,
+    )
+
+
+def _object_keys(attachment: Attachment) -> list[str]:
+    """Every object a row owns: the original and, when it exists, its preview derivative."""
+    keys = [attachment.object_key]
+    if attachment.thumbnail_key:
+        keys.append(attachment.thumbnail_key)
+    return keys
+
+
+def _abort_multipart(storage, attachment: Attachment) -> None:
+    """Release the parts of an upload that will never be completed."""
+    if not attachment.multipart_upload_id:
+        return
+    try:
+        storage.abort_multipart(attachment.object_key, attachment.multipart_upload_id)
+    except StorageError:
+        logger.warning(
+            "could not abort an abandoned multipart upload",
+            extra={
+                "event": "attachment.multipart_abort_failed",
+                "attachment_id": str(attachment.id),
+            },
+        )
+    attachment.multipart_upload_id = None
 
 
 def _reject(database: Session, attachment: Attachment, detail: str) -> None:
@@ -250,13 +481,17 @@ def _reject(database: Session, attachment: Attachment, detail: str) -> None:
     attachment.scan_state = REJECTED
     attachment.scan_detail = detail[:240]
     attachment.finalized_at = datetime.now(UTC)
+    storage = get_storage()
     try:
-        get_storage().delete(attachment.object_key)
+        for key in _object_keys(attachment):
+            storage.delete(key)
     except StorageError:
         logger.warning(
             "could not remove a rejected object",
             extra={"event": "attachment.reject_object_failed", "attachment_id": str(attachment.id)},
         )
+    _abort_multipart(storage, attachment)
+    attachment.thumbnail_key = None
     database.commit()
 
 
@@ -321,6 +556,9 @@ def finalize_upload(database: Session, *, attachment_id: UUID, user: User) -> At
         if len(payload) != stored.size:
             _reject(database, attachment, "the object changed while it was being verified")
             raise HTTPException(status_code=422, detail="The upload could not be verified.")
+        # The digest of what arrived, before re-encoding, is what a client's own digest of the
+        # same file can be matched against.
+        source_digest = hashlib.sha256(payload).hexdigest()
         try:
             verdict = scanner.scan(payload, declared_mime=attachment.declared_mime_type)
         except ScanUnavailable:
@@ -340,6 +578,7 @@ def finalize_upload(database: Session, *, attachment_id: UUID, user: User) -> At
         )
         checksum.update(payload)
         size = len(payload)
+        _store_thumbnail(attachment, payload)
     else:
         # Video and audio are read once, in chunks: hashed on the way through, and streamed
         # to the scanner instead of being held in memory.
@@ -357,15 +596,40 @@ def finalize_upload(database: Session, *, attachment_id: UUID, user: User) -> At
             _reject(database, attachment, verdict.detail or "the scan rejected the upload")
             raise HTTPException(status_code=422, detail="The upload was rejected by the scanner.")
         size = stored.size
+        # Nothing is re-encoded on this path, so the received bytes and the stored bytes have
+        # the same digest.
+        source_digest = checksum.hexdigest()
 
     attachment.detected_mime_type = attachment.declared_mime_type
     attachment.size_bytes = size
+    attachment.source_checksum_sha256 = source_digest
     attachment.checksum_sha256 = checksum.hexdigest()
     attachment.scan_state = SCANNED
     attachment.scan_detail = ""
     attachment.finalized_at = datetime.now(UTC)
     database.commit()
     return attachment
+
+
+def _store_thumbnail(attachment: Attachment, payload: bytes) -> None:
+    """Write the preview derivative beside the original, if one is worth keeping.
+
+    A failure here is not a failure of the upload: the reader falls back to the original, so
+    the object is promoted and only the derivative is missing.
+    """
+    thumbnail = render_thumbnail(payload, attachment.declared_mime_type)
+    if thumbnail is None:
+        return
+    key = thumbnail_key(attachment.object_key)
+    try:
+        get_storage().put_bytes(key, thumbnail, content_type=THUMBNAIL_MIME)
+    except StorageError:
+        logger.warning(
+            "could not write an attachment thumbnail",
+            extra={"event": "attachment.thumbnail_failed", "attachment_id": str(attachment.id)},
+        )
+        return
+    attachment.thumbnail_key = key
 
 
 def _require_post_media_read(database: Session, attachment: Attachment, user: User) -> None:
@@ -431,6 +695,149 @@ def open_object(attachment: Attachment, *, start: int = 0, length: int | None = 
     payload = storage.get_bytes(attachment.object_key)
     end = None if length is None else start + length
     return iter([payload[start:end]])
+
+
+def open_thumbnail(attachment: Attachment):
+    """Stream the preview derivative. It is small, so it is never a range read."""
+    if not attachment.thumbnail_key:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    storage = get_storage()
+    iterate = getattr(storage, "iter_chunks", None)
+    if iterate is not None:
+        return iterate(attachment.thumbnail_key)
+    return iter([storage.get_bytes(attachment.thumbnail_key)])
+
+
+def _pending_upload(database: Session, *, attachment_id: UUID, user: User) -> Attachment:
+    """The caller's own unfinished upload, or the same non-revealing 404 as everything else."""
+    attachment = database.get(Attachment, attachment_id)
+    if (
+        attachment is None
+        or attachment.owner_user_id != user.id
+        or attachment.scan_state != PENDING_UPLOAD
+        or attachment.deleted_at is not None
+    ):
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    if attachment.expires_at is not None:
+        expires = attachment.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires < datetime.now(UTC):
+            raise HTTPException(status_code=409, detail="The upload target expired. Retry.")
+    return attachment
+
+
+def start_multipart(
+    database: Session, *, attachment_id: UUID, user: User
+) -> MultipartSession:
+    """Open, or resume, the part session for one of the caller's pending uploads.
+
+    Resuming matters more than starting: a client that lost its connection asks again and
+    receives the same upload id, so the parts it already delivered are still accounted for.
+    """
+    settings = get_settings()
+    attachment = _pending_upload(database, attachment_id=attachment_id, user=user)
+    size = attachment.declared_size_bytes
+    if size <= 0:
+        raise HTTPException(status_code=422, detail="The upload must not be empty.")
+    plan = multipart_part_plan(size) or MultipartPlan(
+        part_size=max(MIN_PART_BYTES, settings.attachment_multipart_part_bytes),
+        part_count=1,
+    )
+    storage = get_storage()
+    upload_id = attachment.multipart_upload_id
+    if not upload_id:
+        try:
+            upload_id = storage.create_multipart(
+                attachment.object_key, content_type=attachment.declared_mime_type
+            )
+        except StorageError:
+            raise HTTPException(
+                status_code=503, detail="Object storage is unavailable. Retry in a moment."
+            ) from None
+        attachment.multipart_upload_id = upload_id
+        # The part URLs are issued now, so the recorded deadline must match them: a target
+        # issued earlier must not be reaped while its parts are still arriving.
+        attachment.expires_at = datetime.now(UTC) + timedelta(
+            seconds=settings.attachment_upload_ttl_seconds
+        )
+        database.commit()
+    parts: list[dict[str, int | str]] = []
+    for number in range(1, plan.part_count + 1):
+        offset = (number - 1) * plan.part_size
+        try:
+            url = storage.presign_part(
+                attachment.object_key,
+                upload_id,
+                number,
+                expires_in=settings.attachment_upload_ttl_seconds,
+            )
+        except StorageError:
+            raise HTTPException(
+                status_code=503, detail="Object storage is unavailable. Retry in a moment."
+            ) from None
+        parts.append(
+            {
+                "number": number,
+                "offset": offset,
+                "size": min(plan.part_size, size - offset),
+                "url": url,
+            }
+        )
+    return MultipartSession(
+        upload_id=upload_id,
+        part_size=plan.part_size,
+        parts=parts,
+        expires_in=settings.attachment_upload_ttl_seconds,
+    )
+
+
+def complete_multipart(
+    database: Session,
+    *,
+    attachment_id: UUID,
+    user: User,
+    parts: Iterable[tuple[int, str]],
+) -> Attachment:
+    """Assemble the parts, then run the same verify-and-scan step a single POST would."""
+    attachment = database.get(Attachment, attachment_id)
+    if (
+        attachment is None
+        or attachment.owner_user_id != user.id
+        or attachment.deleted_at is not None
+        or attachment.scan_state == REJECTED
+    ):
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    # A replay after the parts were assembled (a lost response, or a scanner that was down)
+    # owes only the verification step, which is itself safe to replay.
+    if attachment.multipart_upload_id is None:
+        if attachment.scan_state in (PENDING_SCAN, SCANNED):
+            return finalize_upload(database, attachment_id=attachment_id, user=user)
+        raise HTTPException(status_code=409, detail="No upload is in progress for this file.")
+    if attachment.scan_state != PENDING_UPLOAD:
+        raise HTTPException(status_code=409, detail="No upload is in progress for this file.")
+    upload_id = attachment.multipart_upload_id
+    ordered = sorted(parts, key=lambda part: part[0])
+    numbers = [number for number, _etag in ordered]
+    expected = (multipart_part_plan(attachment.declared_size_bytes) or MultipartPlan(1, 1)).part_count
+    if numbers != list(range(1, expected + 1)):
+        raise HTTPException(status_code=422, detail="The uploaded parts are incomplete.")
+    for _number, etag in ordered:
+        if not etag or len(etag) > 200:
+            raise HTTPException(status_code=422, detail="A part is missing its ETag.")
+    try:
+        get_storage().complete_multipart(
+            attachment.object_key,
+            upload_id,
+            [{"PartNumber": number, "ETag": etag.strip()} for number, etag in ordered],
+        )
+    except StorageError:
+        raise HTTPException(
+            status_code=503, detail="The upload could not be completed. Retry in a moment."
+        ) from None
+    attachment.multipart_upload_id = None
+    database.commit()
+    return finalize_upload(database, attachment_id=attachment_id, user=user)
 
 
 def parse_byte_range(header: str, size: int) -> tuple[int, int] | None:
@@ -504,8 +911,10 @@ def record_delivery(database: Session, *, attachment: Attachment, user: User) ->
 
 def expire_attachment(database: Session, attachment: Attachment) -> None:
     """Delete the stored object and leave the row as a tombstone the transcript can name."""
+    storage = get_storage()
     try:
-        get_storage().delete(attachment.object_key)
+        for key in _object_keys(attachment):
+            storage.delete(key)
     except StorageError:
         logger.warning(
             "could not remove a delivered attachment's object",
@@ -514,12 +923,13 @@ def expire_attachment(database: Session, attachment: Attachment) -> None:
                 "attachment_id": str(attachment.id),
             },
         )
+    attachment.thumbnail_key = None
     attachment.deleted_at = datetime.now(UTC)
     database.commit()
 
 
 def attachment_payload(attachment: Attachment) -> AttachmentPayload:
-    """The client-facing shape: verified metadata plus a route, never a storage URL."""
+    """The client-facing shape: verified metadata plus routes, never a storage URL."""
     media = media_type_for(attachment)
     return AttachmentPayload(
         id=str(attachment.id),
@@ -530,6 +940,13 @@ def attachment_payload(attachment: Attachment) -> AttachmentPayload:
         kind=media.kind,
         expired=attachment.deleted_at is not None,
         download_url=f"/attachments/{attachment.id}/download",
+        # A preview is a rendering hint, not the file: the reader still downloads the original
+        # to keep a copy, which is what releases the stored object.
+        thumbnail_url=(
+            f"/attachments/{attachment.id}/thumbnail"
+            if attachment.thumbnail_key and attachment.deleted_at is None
+            else None
+        ),
     )
 
 
@@ -682,9 +1099,10 @@ def delete_attachments(database: Session, attachments: list[Attachment]) -> int:
     """Remove objects first, then rows: a row without its object only hides unreachable bytes."""
     if not attachments:
         return 0
-    keys = [attachment.object_key for attachment in attachments]
+    storage = get_storage()
+    keys = [key for attachment in attachments for key in _object_keys(attachment)]
     try:
-        get_storage().delete_many(keys)
+        storage.delete_many(keys)
     except StorageError:
         # Revoking access matters more than reclaiming the bytes, so the rows still go and
         # the failure is logged for an operator to reconcile.
@@ -693,6 +1111,7 @@ def delete_attachments(database: Session, attachments: list[Attachment]) -> int:
             extra={"event": "attachment.delete_object_failed", "objects": len(keys)},
         )
     for attachment in attachments:
+        _abort_multipart(storage, attachment)
         database.delete(attachment)
     return len(attachments)
 

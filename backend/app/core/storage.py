@@ -92,7 +92,9 @@ class ObjectStorage:
         rules = [
             {
                 "AllowedOrigins": list(origins),
-                "AllowedMethods": ["POST", "GET", "HEAD"],
+                # PUT is what a multipart part uses; a dropped connection then costs one part
+                # rather than the whole file.
+                "AllowedMethods": ["POST", "PUT", "GET", "HEAD"],
                 "AllowedHeaders": ["*"],
                 "ExposeHeaders": ["ETag"],
                 "MaxAgeSeconds": 300,
@@ -179,6 +181,74 @@ class ObjectStorage:
             )
         except (BotoCoreError, ClientError) as error:
             raise StorageError(f"could not write object {key!r}") from error
+
+    def copy_object(self, source_key: str, target_key: str, *, content_type: str) -> None:
+        """Copy inside the storage service, so a deduplicated upload crosses no client link."""
+        try:
+            self._client.copy_object(
+                Bucket=self.bucket,
+                Key=target_key,
+                CopySource={"Bucket": self.bucket, "Key": source_key},
+                ContentType=content_type,
+                MetadataDirective="REPLACE",
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(f"could not copy object {source_key!r}") from error
+
+    def create_multipart(self, key: str, *, content_type: str) -> str:
+        """Open an S3 multipart upload and return the id the client's parts belong to."""
+        try:
+            response = self._client.create_multipart_upload(
+                Bucket=self.bucket, Key=key, ContentType=content_type
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(f"could not start a multipart upload for {key!r}") from error
+        return response["UploadId"]
+
+    def presign_part(
+        self, key: str, upload_id: str, part_number: int, *, expires_in: int
+    ) -> str:
+        """A URL for one part. The part's ETag comes back from the PUT response."""
+        try:
+            return self._client.generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": self.bucket,
+                    "Key": key,
+                    "UploadId": upload_id,
+                    "PartNumber": part_number,
+                },
+                ExpiresIn=expires_in,
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError("could not issue a part upload target") from error
+
+    def complete_multipart(
+        self, key: str, upload_id: str, parts: list[dict[str, Any]]
+    ) -> None:
+        try:
+            self._client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise StorageError(f"could not complete the multipart upload for {key!r}") from error
+
+    def abort_multipart(self, key: str, upload_id: str) -> None:
+        """Discard uncompleted parts. An upload that is already gone is not a failure."""
+        try:
+            self._client.abort_multipart_upload(
+                Bucket=self.bucket, Key=key, UploadId=upload_id
+            )
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code")
+            if code in {"NoSuchUpload", "404", "NotFound"}:
+                return
+            raise StorageError(f"could not abort the multipart upload for {key!r}") from error
+        except BotoCoreError as error:
+            raise StorageError(f"could not abort the multipart upload for {key!r}") from error
 
     def delete(self, key: str) -> None:
         """Delete one object. A missing object is not an error: deletion is idempotent."""

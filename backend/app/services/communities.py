@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core import events
 from app.core.scoping import community_scope, platform_scope
 from app.models import (
+    Attachment,
     Comment,
     Community,
     CommunityAuditEvent,
@@ -17,6 +18,7 @@ from app.models import (
     PlatformAuditEvent,
     Post,
 )
+from app.services.attachments import delete_attachments
 from app.services.audit import record_audit
 from app.services.outbox import enqueue_event
 
@@ -65,6 +67,14 @@ def delete_unowned_community(database: Session, community: Community) -> None:
     database.query(CommunityAuditEvent).filter(
         CommunityAuditEvent.community_id == community.id
     ).delete(synchronize_session=False)
+    # Post media lives outside PostgreSQL, so a cascading delete cannot reach it. The objects
+    # (original and preview) are removed explicitly, and the rows are flushed before the posts
+    # are dropped so the database cascade does not try to delete them a second time.
+    post_media = list(
+        database.scalars(select(Attachment).where(Attachment.post_id.in_(post_ids)))
+    )
+    delete_attachments(database, post_media)
+    database.flush()
     database.query(Comment).filter(Comment.post_id.in_(post_ids)).delete(synchronize_session=False)
     database.query(Post).filter(Post.community_id == community.id).delete(synchronize_session=False)
     database.query(CommunityMembership).filter(

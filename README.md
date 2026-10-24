@@ -13,7 +13,7 @@ Social+ is a finite social communication platform. Phases 1–6 of [implementati
 - Persistence: PostgreSQL with explicit Alembic migrations. The application never creates production tables at startup.
 - Identity: opaque server-managed session tokens, stored only as SHA-256 digests; cookies are HttpOnly, SameSite=Lax, and Secure in production. Forms use session-bound CSRF tokens.
 - Identity: email verification is disabled for the MVP. Registration signs users in immediately; enable verification before opening registration publicly.
-- Recovery: one-time, hashed, 30-minute password reset tokens delivered by SMTP. Responses do not reveal whether an account exists.
+- Recovery: one-time, hashed, 30-minute password reset tokens delivered by SMTP. Responses do not reveal whether an account exists. A signed-in user changes their password from `/settings` by giving the current one; that signs out every other session and retires any unused reset link, because both were obtained with the old credential.
 - Relationships: follows and blocks are unique directed edges. A block prevents follows in either direction and removes follows already present between the two accounts.
 - Communities: public communities are discoverable and joinable by signed-in users. Private communities do not appear in discovery and return a non-revealing 404 to non-members; owners and moderators can invite users by username. Owners alone can grant or revoke moderator roles; moderators can remove ordinary members. Administrative changes are audited.
 - Discussions: community members can create bounded text posts and threaded comments. Post reads respect community privacy and block relationships. Authors can remove their own content; owners/moderators can remove content, lock discussions, review reports, and leave moderation events. Exact duplicate posts and rapid posting are rate-limited.
@@ -238,11 +238,51 @@ Downloads folder — a `file:///` navigation is blocked from an `https` page and
 never exposed — so this local copy is the closest the application can get. Anyone without that
 copy, including the sender, sees the tombstone.
 
+Bandwidth is bounded at both ends. Before an upload, the browser re-encodes a large JPEG, PNG,
+or WebP at no more than 1600 px on the long edge (`static/js/media-optimize.js`) and only keeps
+the result when it is smaller; that is the one saving which also reduces every later read of the
+same file. After an upload, a large image also gets a server-rendered preview: `finalize`
+decodes the verified bytes and writes a WebP derivative of at most 640 px
+(`app/core/media.py`), served at `GET /attachments/{id}/thumbnail` under the same authorization
+as the original. Bubbles and feed tiles render the preview; the original is fetched only when the
+reader opens it, and that download is also what confirms delivery. A preview is deliberately not
+a delivery: the reader's browser does not hold the file until they ask for it, so the stored copy
+survives. The derivative is not counted against the account quota, and it is deleted with the
+original.
+
+A file above `ATTACHMENT_MULTIPART_THRESHOLD_BYTES` (8 MB by default) is uploaded in
+`ATTACHMENT_MULTIPART_PART_BYTES` parts instead of one request. The browser asks
+`POST /attachments/{id}/multipart` for a part session, PUTs each part straight to storage, and
+posts the collected ETags to `/multipart/complete`, which assembles the object and then runs the
+ordinary verify-and-scan step. Asking for the session again returns the same upload id, so a
+connection that drops mid-file resumes at the part that failed rather than at byte zero, and a
+part that fails is retried twice before the upload is reported as failed. An upload that is
+abandoned, rejected, or discarded has its open session aborted; an operator should still add a
+bucket lifecycle rule that aborts incomplete multipart uploads after a day, because a client that
+vanishes before its next request never reaches the application. The bucket CORS policy allows
+`PUT` for this reason, and exposes the `ETag` the client must return.
+
+A repeat upload is answered with a copy instead of a transfer. The browser computes SHA-256 of
+the file it is about to send and includes it in the target request; when this account already has
+a verified, unexpired attachment with the same received-bytes digest, declared type, and size,
+`issue_upload_target` copies the object (and its preview) inside the storage service and returns
+`reused: true` with no upload URL. The digest of the bytes as received is stored separately from
+the digest of the stored object (`source_checksum_sha256`), because image normalization changes
+the bytes; matching on the normalized digest would never answer for the file the client holds.
+Only the caller's own attachments are candidates, and the copy is a separate object rather than a
+shared one, so release, moderation, and account deletion keep their existing rules. It does count
+against the quota, which is the one cost of the trade.
+
+Downloads carry a content `ETag`, and `private, max-age=86400, immutable`, so a repeat view is
+answered from the browser or revalidated with a `304` instead of resending the bytes. Previews
+carry their own ETag and the same lifetime.
+
 Each transition is durable, so a scanner outage leaves an upload in `pending_scan` and tells the
 client to retry instead of promoting unverified bytes. Abandoned uploads are reaped when the
-next target is issued, and deleting an account removes its objects before its rows. Markup and
-SVG are refused outright rather than scanned, because no scan verdict makes them safe to serve
-from the application's origin.
+next target is issued, deleting an account removes its objects before its rows, and deleting a
+community removes the media of the posts it takes with it — a database cascade can drop the rows
+but never the bytes, so that path is explicit. Markup and SVG are refused outright rather than
+scanned, because no scan verdict makes them safe to serve from the application's origin.
 
 Two things outside the application have to be right for uploads to work, and both fail in ways
 that look like a broken attachment rather than a configuration problem:
@@ -404,9 +444,13 @@ Metrics: `soccom_calls_started_total{media,kind}`, `soccom_calls_ended_total{rea
 `soccom_call_ring_duration_seconds` histogram (ring to first accept, the server's view of join
 latency). A client-reported connection failure lands in `soccom_calls_ended_total{reason="failed"}`,
 which is the drop rate; relay usage share belongs to the TURN server's own metrics, not the
-application. Media quality is a browser concern: the client samples `getStats` during video
-calls and turns the camera off after two consecutive samples above 15% packet loss, keeping
-audio.
+application. Media quality is a browser concern, and it is bounded: Opus runs at 32 kbit/s with
+DTX and in-band FEC, video is capped per peer at 1.2 Mbit/s for one other participant,
+700 kbit/s for two, and 400 kbit/s beyond that, and the client samples `getStats` during video
+calls — halving the video ceiling on two consecutive samples of loss or a shrinking outgoing
+estimate, and turning the camera off only once that ceiling is already at its floor. Muting
+detaches the audio track and switching the camera off detaches the video track, so a muted
+stream sends nothing at all instead of silence or black frames.
 
 The conversation page is the only page whose `Permissions-Policy` allows the camera and
 microphone. A refused permission, a missing device, a device already in use, an unsupported
@@ -421,10 +465,15 @@ need one uplink per other participant, and iOS Safari suspends a call when its t
 backgrounded, which the app reports as a connection failure rather than pretending the call
 continues.
 
-**Deferred:** a selective forwarding unit with SFrame for ceilings above the mesh budget, live
-device switching, and multi-device call participation (one page per account takes part, as
-above). There is no server-side recording path in the codebase, and no client-side recording
-exists either.
+**Deferred:** a selective forwarding unit. The mesh costs each participant one uplink per other
+participant; the per-stream ceilings above keep a group call's total uplink near that of a 1:1
+call, but the topology itself is the ceiling, and moving past it needs a deployed media server
+(LiveKit, mediasoup, Janus) plus simulcast, and SFrame if group media is to stay end-to-end — an
+SFU decrypts what it forwards, which is why 1:1 calls would stay on the mesh with their
+safety-number check. That is a deployment and key-distribution decision rather than a client
+change, so group calls remain on the mesh for now. Also deferred: live device switching and
+multi-device call participation (one page per account takes part, as above). There is no
+server-side recording path in the codebase, and no client-side recording exists either.
 
 ## Personal updates
 

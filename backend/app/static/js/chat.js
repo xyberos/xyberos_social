@@ -210,20 +210,55 @@
   }
 
   async function prepareAttachment(element) {
-    const record = await cacheAttachment(element);
-    if (record) {
-      if (element.dataset.expired === "true") hydrateFromCache(element, record);
-      else showFromCache(element, record);
-    } else if (element.dataset.expired !== "true" && element.dataset.attachmentInline === "true") {
-      // No local copy: a live attachment still has bytes on the server, an expired one does not.
-      const image = element.querySelector("img[data-attachment-image]");
-      if (image) image.src = element.dataset.attachmentSrc;
+    if (element.dataset.expired === "true") {
+      const record = await attachmentCache.get(element.dataset.attachmentId);
+      if (record) hydrateFromCache(element, record);
+      return;
     }
-    // A rendered image is taller than the placeholder, so the reading position is re-applied.
+    const preview = element.dataset.attachmentThumb;
+    if (preview) {
+      // A preview is the whole point of the derivative: the original stays on the server
+      // until the reader clicks, which is also when the local copy is made.
+      const image = element.querySelector("img[data-attachment-image]");
+      if (image) {
+        image.src = preview;
+        holdReadingPosition();
+      }
+      return;
+    }
+    // No derivative (a small image, or one written before derivatives existed): the original
+    // is small enough to render, and fetching it is the old behaviour.
+    const record = await cacheAttachment(element);
+    if (record) showFromCache(element, record);
     holdReadingPosition();
   }
 
-  function interceptDownload(element) {
+  // Attachment bytes are the largest thing a conversation holds, so a preview is fetched when
+  // it approaches the viewport instead of when the message is rendered. A page of history
+  // therefore costs what the reader actually looks at, not what it contains.
+  const attachmentObserver =
+    typeof IntersectionObserver === "function"
+      ? new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              attachmentObserver.unobserve(entry.target);
+              prepareAttachment(entry.target);
+            }
+          },
+          { rootMargin: "400px 0px" }
+        )
+      : null;
+
+  function prepareWhenVisible(element) {
+    if (!attachmentObserver) {
+      prepareAttachment(element);
+      return;
+    }
+    attachmentObserver.observe(element);
+  }
+
+  function interceptDownload(element, { open = false } = {}) {
     element.addEventListener("click", async (event) => {
       if (element.dataset.expired === "true") return;
       event.preventDefault();
@@ -234,7 +269,12 @@
       }
       const link = document.createElement("a");
       link.href = objectUrl(record);
-      link.download = record.filename;
+      if (open) {
+        link.target = "_blank";
+        link.rel = "noopener";
+      } else {
+        link.download = record.filename;
+      }
       link.click();
     });
   }
@@ -250,11 +290,13 @@
       element.dataset.attachmentSrc = attachment.download_url;
       element.dataset.attachmentName = attachment.filename;
       element.dataset.attachmentInline = String(Boolean(attachment.inline));
+      element.dataset.attachmentKind = attachment.kind || "";
+      element.dataset.attachmentThumb = attachment.thumbnail_url || "";
       element.dataset.attachmentSize = String(attachment.size_bytes);
       if (attachment.expired) {
         element.dataset.expired = "true";
         element.textContent = `${attachment.filename} · Attachment expired`;
-      } else if (attachment.inline) {
+      } else if (attachment.inline && attachment.kind === "image") {
         element.href = attachment.download_url;
         element.target = "_blank";
         element.rel = "noopener";
@@ -263,13 +305,19 @@
         image.alt = attachment.filename;
         image.loading = "lazy";
         element.append(image);
+        // The preview is cheap, but the click is what stores the original and confirms
+        // delivery, so it goes through the same path as any other download.
+        interceptDownload(element, { open: true });
       } else {
+        // A video or a document is fetched when the reader asks for it, never to render a
+        // link: the message list carries the name and the size, and the click is the request.
         element.href = attachment.download_url;
         element.textContent = `${attachment.filename} · ${Math.round(attachment.size_bytes / 1024)} KB`;
         interceptDownload(element);
       }
       container.append(element);
-      prepareAttachment(element);
+      if (attachment.expired) prepareAttachment(element);
+      else if (attachment.inline && attachment.kind === "image") prepareWhenVisible(element);
     });
     row.append(container);
   }
@@ -282,7 +330,7 @@
       : "";
   }
 
-  async function requestUploadTarget(file) {
+  async function requestUploadTarget(file, checksum) {
     const response = await fetch(`/conversations/${conversationId}/attachments`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": newIdempotencyKey() },
@@ -290,6 +338,7 @@
         filename: file.name,
         content_type: file.type,
         size_bytes: file.size,
+        checksum_sha256: checksum || undefined,
       }),
     });
     if (!response.ok) {
@@ -299,23 +348,11 @@
     return response.json();
   }
 
-  function sendToStorage(target, file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const form = new FormData();
-      Object.entries(target.fields).forEach(([name, value]) => form.append(name, value));
-      form.append("file", file);
-      const upload = new XMLHttpRequest();
-      upload.open("POST", target.upload_url);
-      upload.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total);
-      });
-      upload.addEventListener("load", () => {
-        if (upload.status >= 200 && upload.status < 300) resolve();
-        else reject(new Error("The upload did not reach storage."));
-      });
-      upload.addEventListener("error", () => reject(new Error("The upload failed.")));
-      upload.send(form);
-    });
+  // The server keeps the digest honest at finalize; this one only lets it answer a repeat
+  // upload with a copy of bytes it already holds.
+  async function checksumFor(file) {
+    const digest = globalThis.SocialMediaOptimize?.sha256;
+    return digest ? digest(file) : null;
   }
 
   async function finalizeUpload(attachmentId) {
@@ -328,8 +365,13 @@
   }
 
   async function completeUpload(target, file, onProgress) {
-    await sendToStorage(target, file, onProgress);
-    return finalizeUpload(target.attachment_id);
+    // The bytes are already in storage for this account: nothing to send, nothing to scan.
+    if (target.reused) return { id: target.attachment_id };
+    const upload = globalThis.SocialMediaOptimize?.uploadFile;
+    if (!upload) throw new Error("This browser cannot upload files.");
+    const { finalized } = await upload(target, file, onProgress);
+    // A split upload is verified when its last part is assembled, so it arrives complete.
+    return finalized || finalizeUpload(target.attachment_id);
   }
 
   function connect() {
@@ -427,6 +469,9 @@
     statsTimer: null,
     hideTimer: null,
     degradedSamples: 0,
+    // The current outbound video ceiling, lowered when the link cannot carry it.
+    videoMaxBitrate: 1200000,
+    videoDegraded: false,
   };
 
   const CALL_END_TEXT = {
@@ -444,6 +489,85 @@
     "rate-limited": "Too many call signals. Wait a moment and try again.",
     "group-calls-unavailable": "Group calls are not available.",
   };
+
+  // What a call is allowed to spend. Audio is a narrowband conversation, so 32 kbit/s covers
+  // Opus at full quality; video scales down as the mesh grows, because in a mesh every
+  // participant uploads to every other one and the uplink is the scarce side of the link.
+  const AUDIO_MAX_BITRATE = 32000;
+  const VIDEO_MIN_BITRATE = 150000;
+  const VIDEO_BITRATE_BY_PEERS = { 1: 1200000, 2: 700000 };
+  const VIDEO_GROUP_BITRATE = 400000;
+
+  function videoBitrateFor(peers) {
+    return VIDEO_BITRATE_BY_PEERS[peers] || VIDEO_GROUP_BITRATE;
+  }
+
+  // Opus carries two knobs that matter for a call: DTX stops sending frames during silence
+  // instead of spending the full bitrate on nothing, and in-band FEC repairs loss without a
+  // retransmission. Both live in the fmtp line of the negotiation this page produces, so the
+  // browser's own encoder budget is bounded the same way the sender is.
+  function preferLowBandwidthOpus(sdp) {
+    if (!sdp) return sdp;
+    const payloadType = /a=rtpmap:(\d+) opus\/48000(?:\/\d+)?/i.exec(sdp)?.[1];
+    if (!payloadType) return sdp;
+    const line = new RegExp(`a=fmtp:${payloadType} ([^\\r\\n]*)`);
+    const match = line.exec(sdp);
+    if (!match) return sdp;
+    const params = new Map();
+    for (const part of match[1].split(";")) {
+      const [key, value] = part.split("=");
+      if (key?.trim()) params.set(key.trim(), (value ?? "").trim());
+    }
+    params.set("stereo", "0");
+    params.set("usedtx", "1");
+    params.set("useinbandfec", "1");
+    params.set("maxaveragebitrate", String(AUDIO_MAX_BITRATE));
+    const fmtp = `a=fmtp:${payloadType} ${Array.from(params, ([key, value]) => `${key}=${value}`).join(";")}`;
+    return sdp.replace(line, () => fmtp);
+  }
+
+  // The ceiling is applied to the sender rather than trusted to congestion control: without
+  // it, a video encoder happily fills whatever the link will take.
+  function capSenders(connection) {
+    for (const sender of connection.getSenders()) {
+      const kind = sender.track?.kind;
+      if (kind !== "audio" && kind !== "video") continue;
+      let params;
+      try {
+        params = sender.getParameters();
+      } catch {
+        continue;
+      }
+      if (!params.encodings?.length) params.encodings = [{}];
+      const encoding = params.encodings[0];
+      if (kind === "audio") {
+        encoding.maxBitrate = AUDIO_MAX_BITRATE;
+      } else {
+        encoding.maxBitrate = call.videoMaxBitrate;
+        encoding.maxFramerate = 24;
+        params.degradationPreference = "balanced";
+        sender.track.contentHint = "motion";
+      }
+      sender.setParameters(params).catch(() => {
+        // A browser with partial `setParameters` support still accepts the bitrate ceiling,
+        // which is the part that decides how many bytes leave this machine.
+        let minimal;
+        try {
+          minimal = sender.getParameters();
+        } catch {
+          return;
+        }
+        if (!minimal.encodings?.length) minimal.encodings = [{}];
+        minimal.encodings[0].maxBitrate =
+          kind === "audio" ? AUDIO_MAX_BITRATE : call.videoMaxBitrate;
+        sender.setParameters(minimal).catch(() => {});
+      });
+    }
+  }
+
+  function capAllSenders() {
+    for (const peerState of call.peers.values()) capSenders(peerState.connection);
+  }
 
   function participantRow(payload, userId) {
     return (payload?.participants || []).find((row) => row.user_id === userId) || null;
@@ -531,9 +655,24 @@
     const wantsVideo = media === "video";
     try {
       return await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        // Speech in one channel at 48 kHz is what Opus encodes efficiently; stereo doubles
+        // the audio budget for nothing and the encoder averages the channels back down.
+        audio: {
+          channelCount: { ideal: 1 },
+          sampleRate: { ideal: 48000 },
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        // 720p is the useful ceiling for a conversation; the sender caps below decide how
+        // much of that is actually transmitted.
         video: wantsVideo
-          ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
+          ? {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30, max: 30 },
+              facingMode: "user",
+            }
           : false,
       });
     } catch (error) {
@@ -724,13 +863,23 @@
       remoteDescriptionSet: false,
       mediaElement: null,
       tile: null,
+      audioSender: null,
+      videoSender: null,
     };
     call.peers.set(peer.user_id, peerState);
     if (call.localStream) {
-      call.localStream
-        .getTracks()
-        .forEach((track) => connection.addTrack(track, call.localStream));
+      call.localStream.getTracks().forEach((track) => {
+        const sender = connection.addTrack(track, call.localStream);
+        // Remembered by kind because a sender whose track has been replaced with `null` no
+        // longer answers that question.
+        if (track.kind === "video") peerState.videoSender = sender;
+        else if (track.kind === "audio") peerState.audioSender = sender;
+      });
     }
+    // A peer that joins while the microphone or camera is off must not receive that track
+    // just because it was added with the others.
+    if (call.muted) peerState.audioSender?.replaceTrack(null).catch(() => {});
+    if (!call.cameraOn) peerState.videoSender?.replaceTrack(null).catch(() => {});
     connection.onicecandidate = (event) => {
       if (event.candidate) {
         sendSignal(peer.user_id, "ice", { candidate: event.candidate.toJSON() });
@@ -741,6 +890,9 @@
     };
     connection.onconnectionstatechange = () => {
       if (connection.connectionState === "failed") notePeerFailure(peer.user_id);
+      // The ceiling can only be applied once the sender has a negotiated encoding, which is
+      // also the first moment there are bytes worth bounding.
+      if (connection.connectionState === "connected") capSenders(connection);
     };
     if (currentUserId < peer.user_id) {
       negotiate(peerState, peer.user_id);
@@ -751,7 +903,9 @@
   async function negotiate(peerState, userId) {
     try {
       const offer = await peerState.connection.createOffer();
+      offer.sdp = preferLowBandwidthOpus(offer.sdp);
       await peerState.connection.setLocalDescription(offer);
+      capSenders(peerState.connection);
       const description = peerState.connection.localDescription;
       sendSignal(userId, "offer", { type: description.type, sdp: description.sdp });
     } catch {
@@ -784,6 +938,14 @@
       for (const peer of joined) {
         if (!call.peers.has(peer.user_id)) createPeer(peer);
       }
+    }
+    // A mesh sends one stream to every peer, so the per-stream ceiling follows the
+    // participant count: a group call keeps roughly the uplink of a 1:1 call instead of
+    // multiplying it by the number of people in the room.
+    const ceiling = videoBitrateFor(Math.max(joined.length, 1));
+    if (!call.videoDegraded && ceiling !== call.videoMaxBitrate) {
+      call.videoMaxBitrate = ceiling;
+      capAllSenders();
     }
     updateSafetyNumbers();
   }
@@ -844,6 +1006,8 @@
     call.id = payload.id;
     call.media = payload.media;
     call.degradedSamples = 0;
+    call.videoMaxBitrate = videoBitrateFor(1);
+    call.videoDegraded = false;
     renderCall();
     syncPeers();
     startStatsMonitor();
@@ -878,7 +1042,9 @@
         peerState.remoteDescriptionSet = true;
         await drainCandidates(peerState);
         const answer = await connection.createAnswer();
+        answer.sdp = preferLowBandwidthOpus(answer.sdp);
         await connection.setLocalDescription(answer);
+        capSenders(connection);
         const description = connection.localDescription;
         sendSignal(packet.from_user_id, "answer", {
           type: description.type,
@@ -921,25 +1087,43 @@
 
   function setMuted(muted) {
     call.muted = muted;
-    call.localStream?.getAudioTracks().forEach((track) => {
-      track.enabled = !muted;
-    });
+    const track = call.localStream?.getAudioTracks()[0] || null;
+    if (track) track.enabled = !muted;
+    // A muted track still sends silence. Replacing it with nothing stops the RTP stream
+    // until the microphone button is pressed again, which is the only way to spend zero
+    // bytes while muted.
+    if (track) {
+      for (const peerState of call.peers.values()) {
+        peerState.audioSender?.replaceTrack(muted ? null : track).catch(() => {});
+      }
+    }
     if (callMute) callMute.setAttribute("aria-pressed", muted ? "true" : "false");
     if (callMuteIcon) callMuteIcon.textContent = muted ? "mic_off" : "mic";
   }
 
   function setCameraEnabled(enabled) {
     call.cameraOn = enabled;
-    call.localStream?.getVideoTracks().forEach((track) => {
-      track.enabled = enabled;
-    });
+    const track = call.localStream?.getVideoTracks()[0] || null;
+    if (track) track.enabled = enabled;
+    // A disabled video track still encodes black frames and still costs an RTP stream, so
+    // the camera is detached from every sender rather than merely paused.
+    for (const peerState of call.peers.values()) {
+      peerState.videoSender
+        ?.replaceTrack(enabled ? track : null)
+        // Restoring the track also restores the ceiling: a sender that had no track when the
+        // call was negotiated never received one.
+        .then(() => capSenders(peerState.connection))
+        .catch(() => {});
+    }
     if (callCameraIcon) callCameraIcon.textContent = enabled ? "videocam" : "videocam_off";
     if (callCameraLabel) callCameraLabel.textContent = enabled ? "Camera off" : "Camera on";
     if (callSelfTile) callSelfTile.classList.toggle("call-tile-off", !enabled);
   }
 
-  // Video is the first thing a poor link cannot carry. Two consecutive samples above 15% loss
-  // turn the camera off and keep the audio, instead of letting the call collapse.
+  // Video is the first thing a poor link cannot carry, and the outbound ceiling is the lever
+  // that costs the least quality: each sample that reports loss or a shrinking outgoing
+  // estimate halves the video budget, and only when that budget is already at the floor does
+  // the camera go off. Audio is never reduced.
   function startStatsMonitor() {
     window.clearInterval(call.statsTimer);
     call.statsTimer = null;
@@ -947,6 +1131,7 @@
     call.statsTimer = window.setInterval(async () => {
       if (call.state !== "in-call") return;
       let lossy = false;
+      let outgoing = Infinity;
       for (const peerState of call.peers.values()) {
         try {
           const report = await peerState.connection.getStats();
@@ -958,14 +1143,36 @@
             ) {
               lossy = true;
             }
+            if (
+              stat.type === "candidate-pair" &&
+              stat.state === "succeeded" &&
+              stat.availableOutgoingBitrate > 0
+            ) {
+              outgoing = Math.min(outgoing, stat.availableOutgoingBitrate);
+            }
           });
         } catch {
           // A closed peer connection has no stats to read.
         }
       }
-      call.degradedSamples = lossy ? call.degradedSamples + 1 : 0;
-      if (call.degradedSamples >= 2 && call.cameraOn) {
-        call.degradedSamples = 0;
+      // Only a call that is actually sending video has a budget worth lowering: with the
+      // camera off the outgoing estimate says nothing about what a future stream could use.
+      const congested = lossy || (call.cameraOn && outgoing < call.videoMaxBitrate / 2);
+      call.degradedSamples = congested ? call.degradedSamples + 1 : 0;
+      if (call.degradedSamples < 2) return;
+      call.degradedSamples = 0;
+      if (call.videoMaxBitrate > VIDEO_MIN_BITRATE) {
+        call.videoMaxBitrate = Math.max(
+          VIDEO_MIN_BITRATE,
+          Math.floor(call.videoMaxBitrate / 2)
+        );
+        call.videoDegraded = true;
+        capAllSenders();
+        if (callDetail) {
+          callDetail.textContent = "Poor connection: lower video quality, audio continues.";
+          callDetail.hidden = false;
+        }
+      } else if (call.cameraOn) {
         setCameraEnabled(false);
         if (callDetail) {
           callDetail.textContent = "Poor connection: camera off, audio continues.";
@@ -998,6 +1205,8 @@
     call.muted = false;
     call.cameraOn = false;
     call.degradedSamples = 0;
+    call.videoMaxBitrate = VIDEO_BITRATE_BY_PEERS[1];
+    call.videoDegraded = false;
     if (callMute) callMute.setAttribute("aria-pressed", "false");
     if (callMuteIcon) callMuteIcon.textContent = "mic";
     setCameraEnabled(false);
@@ -1184,26 +1393,33 @@
       event.preventDefault();
       const bodyField = messageForm.elements.namedItem("body");
       const sendButton = messageForm.querySelector("button[type=submit]");
-      const files = attachmentInput ? Array.from(attachmentInput.files || []) : [];
-      if ((!bodyField.value.trim() && files.length === 0) || sendButton.disabled) return;
+      const picked = attachmentInput ? Array.from(attachmentInput.files || []) : [];
+      if ((!bodyField.value.trim() && picked.length === 0) || sendButton.disabled) return;
       sendButton.disabled = true;
       messageError.textContent = "";
-      const progressFor = (index) => (fraction) => {
-        attachmentProgress.textContent =
-          `Uploading ${index + 1}/${files.length}: ${Math.round(fraction * 100)}%`;
-      };
       try {
+        // Re-encoding before the upload is the only step that saves bytes on every later
+        // read as well as this send.
+        const shrink = globalThis.SocialMediaOptimize?.shrinkImage;
+        const files = shrink ? await Promise.all(picked.map((file) => shrink(file))) : picked;
+        const progressFor = (index) => (fraction) => {
+          attachmentProgress.textContent =
+            `Uploading ${index + 1}/${files.length}: ${Math.round(fraction * 100)}%`;
+        };
         const attachmentIds = [];
         if (files.length) {
           // The first target reports the per-message ceiling, so an over-full message is
           // refused before any further bytes are sent.
-          const first = await requestUploadTarget(files[0]);
+          const first = await requestUploadTarget(files[0], await checksumFor(files[0]));
           if (files.length > first.max_attachments) {
             throw new Error(`A message can carry ${first.max_attachments} attachments.`);
           }
           attachmentIds.push((await completeUpload(first, files[0], progressFor(0))).id);
           for (let index = 1; index < files.length; index += 1) {
-            const target = await requestUploadTarget(files[index]);
+            const target = await requestUploadTarget(
+              files[index],
+              await checksumFor(files[index])
+            );
             attachmentIds.push((await completeUpload(target, files[index], progressFor(index))).id);
           }
         }
@@ -1296,13 +1512,22 @@
     holdReadingPosition();
   }
 
-  // Server-rendered attachments: fetch each once, keep it locally, and restore an expired one
-  // from this browser's copy.
+  // Server-rendered attachments: preview only what is visible, and fetch the rest when the
+  // reader clicks it. An expired row restores from this browser's copy if there is one.
   messageList.querySelectorAll("[data-attachment-id]").forEach((element) => {
-    if (element.dataset.expired !== "true" && element.dataset.attachmentInline !== "true") {
-      interceptDownload(element);
+    if (element.dataset.expired === "true") {
+      prepareAttachment(element);
+      return;
     }
-    prepareAttachment(element);
+    if (
+      element.dataset.attachmentInline === "true" &&
+      element.dataset.attachmentKind === "image"
+    ) {
+      prepareWhenVisible(element);
+      interceptDownload(element, { open: true });
+      return;
+    }
+    interceptDownload(element);
   });
 
   scrollToReadingStart();

@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     attachment_message_limit: int = 4
     attachment_account_quota_bytes: int = 1024 * 1024 * 1024
     attachment_upload_ttl_seconds: int = 900
+    # Above this size an upload is split into parts, so a dropped connection costs one part
+    # instead of the whole file. S3 requires at least 5 MB per part except the last.
+    attachment_multipart_threshold_bytes: int = 8 * 1024 * 1024
+    attachment_multipart_part_bytes: int = 8 * 1024 * 1024
 
     # A post carries media that outlives the first reader, so its ceilings are per kind
     # rather than one number: a photo is small, a short video is not, and a song sits between.

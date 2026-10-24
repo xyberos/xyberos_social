@@ -1,6 +1,8 @@
 import re
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 import app.api.routes.identity as identity_routes
 
 from conftest import csrf_from
@@ -181,6 +183,150 @@ def test_password_reset_is_generic_and_one_time(client, monkeypatch):
     assert login_response.status_code == 303
     replay = client.get(f"/reset-password?token={token}")
     assert replay.status_code == 400
+
+
+def change_password(client, *, current, new, confirmation=None):
+    return client.post(
+        "/account/password",
+        data={
+            "csrf_token": csrf_from(client.get("/settings").text),
+            "current_password": current,
+            "new_password": new,
+            "new_password_confirmation": new if confirmation is None else confirmation,
+        },
+        follow_redirects=False,
+    )
+
+
+def test_changing_the_password_replaces_the_credential(client):
+    register(client)
+    page = client.get("/settings").text
+    assert 'action="/account/password"' in page
+    assert 'name="current_password"' in page
+    assert 'name="new_password"' in page
+    assert 'name="new_password_confirmation"' in page
+
+    response = change_password(
+        client, current="correct-horse-battery-staple", new="a-much-longer-passphrase"
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings?password=1"
+    assert "Password updated" in client.get("/settings?password=1").text
+
+    client.post("/logout", data={"csrf_token": csrf_from(client.get("/settings").text)})
+    page = client.get("/login")
+    stale = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_from(page.text),
+            "email": "ada@example.com",
+            "password": "correct-horse-battery-staple",
+        },
+        follow_redirects=False,
+    )
+    assert stale.status_code == 422
+    assert "Email or password is incorrect" in stale.text
+
+    page = client.get("/login")
+    fresh = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_from(page.text),
+            "email": "ada@example.com",
+            "password": "a-much-longer-passphrase",
+        },
+        follow_redirects=False,
+    )
+    assert fresh.status_code == 303
+    assert client.get("/settings").status_code == 200
+
+
+def test_a_password_change_requires_the_current_password(client):
+    register(client)
+    response = change_password(
+        client, current="not-the-password", new="a-much-longer-passphrase"
+    )
+    assert response.status_code == 403
+    assert "current password is incorrect" in response.text
+    # The session survives a refused attempt, and the old credential is still the one in use.
+    assert client.get("/settings").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("new", "confirmation", "message"),
+    [
+        ("short-pass", None, "between 12 and 128"),
+        ("a-much-longer-passphrase", "a-different-long-passphrase", "do not match"),
+        ("correct-horse-battery-staple", None, "differs from the current one"),
+    ],
+)
+def test_a_new_password_is_validated(client, new, confirmation, message):
+    register(client)
+    response = change_password(
+        client,
+        current="correct-horse-battery-staple",
+        new=new,
+        confirmation=confirmation,
+    )
+    assert response.status_code == 422
+    assert message in response.text
+
+
+def test_the_current_session_survives_and_other_devices_do_not(client_factory):
+    first = client_factory()
+    register(first)
+    second = client_factory()
+    page = second.get("/login")
+    assert (
+        second.post(
+            "/login",
+            data={
+                "csrf_token": csrf_from(page.text),
+                "email": "ada@example.com",
+                "password": "correct-horse-battery-staple",
+            },
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    assert second.get("/settings").status_code == 200
+
+    assert (
+        change_password(
+            first, current="correct-horse-battery-staple", new="a-much-longer-passphrase"
+        ).status_code
+        == 303
+    )
+
+    assert first.get("/settings").status_code == 200
+    signed_out = second.get("/settings", follow_redirects=False)
+    assert signed_out.status_code == 303
+    assert signed_out.headers["location"] == "/login"
+
+
+def test_a_password_change_retires_an_unused_reset_link(client, monkeypatch):
+    delivered = []
+    monkeypatch.setattr(
+        identity_routes, "send_password_reset_email", lambda email, url: delivered.append(url)
+    )
+    register(client)
+    page = client.get("/forgot-password")
+    client.post(
+        "/forgot-password",
+        data={"csrf_token": csrf_from(page.text), "email": "ada@example.com"},
+    )
+    token = parse_qs(urlparse(delivered[0]).query)["token"][0]
+
+    assert (
+        change_password(
+            client, current="correct-horse-battery-staple", new="a-much-longer-passphrase"
+        ).status_code
+        == 303
+    )
+
+    retired = client.get(f"/reset-password?token={token}")
+    assert retired.status_code == 400
+    assert "invalid or expired" in retired.text
 
 
 def test_email_verification_routes_are_disabled(client):

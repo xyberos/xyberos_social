@@ -12,7 +12,7 @@
           {% for item in images %}
             <li>
               <a class="post-media-image" href="{{ item.download_url }}" target="_blank" rel="noopener">
-                <img src="{{ item.download_url }}" alt="{{ item.filename }}" loading="lazy" decoding="async">
+                <img src="{{ item.thumbnail_url or item.download_url }}" alt="{{ item.filename }}" loading="lazy" decoding="async">
               </a>
             </li>
           {% endfor %}
@@ -48,7 +48,7 @@
     {% set lead = items[0] %}
     <a class="post-media-peek" href="{{ post_url }}">
       {% if images %}
-        <img src="{{ images[0].download_url }}" alt="" loading="lazy" decoding="async">
+        <img src="{{ images[0].thumbnail_url or images[0].download_url }}" alt="" loading="lazy" decoding="async">
       {% else %}
         <span class="post-media-peek-glyph material-symbols-rounded" aria-hidden="true">{{ 'movie' if lead.kind == 'video' else 'graphic_eq' }}</span>
       {% endif %}

@@ -9,6 +9,7 @@ Storage is faked rather than mocked per call so the presigned target, the object
 deletion are exercised through the same code paths a real S3 service would serve.
 """
 
+import hashlib
 import io
 import re
 import socket
@@ -17,13 +18,15 @@ from uuid import UUID
 
 import pytest
 from PIL import Image
+from sqlalchemy import func, select
 
 from conftest import create_account, csrf_from
 
 from app.core.config import Settings
 from app.core.scanning import ClamAvScanner, ScanUnavailable, ScanVerdict
 from app.core.storage import StoredObject
-from app.models import Attachment
+from app.models import Attachment, Community, Post, User
+from app.services.communities import delete_unowned_community
 
 PNG_BYTES_LIMIT = 10 * 1024 * 1024
 
@@ -31,6 +34,14 @@ PNG_BYTES_LIMIT = 10 * 1024 * 1024
 def png_bytes(size: tuple[int, int] = (4, 4)) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", size, (10, 120, 200)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def noisy_png_bytes(size: tuple[int, int] = (900, 900)) -> bytes:
+    """Noise compresses badly, so a preview of it is unmistakably smaller than the original."""
+    image = Image.effect_noise(size, 64).convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -43,11 +54,24 @@ def jpeg_with_exif() -> bytes:
     return buffer.getvalue()
 
 
+def noisy_jpeg_with_exif(size: tuple[int, int] = (900, 900)) -> bytes:
+    """A large photo carrying metadata: normalization strips it, so the bytes must change."""
+    image = Image.effect_noise(size, 64).convert("RGB")
+    exif = Image.Exif()
+    exif[0x010F] = "TestCamera"
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif, quality=95)
+    return buffer.getvalue()
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.deleted: list[str] = []
         self.targets: list[dict] = []
+        self.copies: list[tuple[str, str]] = []
+        self.multipart: dict[str, dict] = {}
+        self.aborted: list[str] = []
 
     def presign_post(self, key, *, content_type, max_bytes, expires_in):
         self.targets.append({"key": key, "content_type": content_type, "max_bytes": max_bytes})
@@ -66,6 +90,28 @@ class FakeStorage:
 
     def put_bytes(self, key, payload, *, content_type):
         self.objects[key] = payload
+
+    def copy_object(self, source_key, target_key, *, content_type):
+        self.copies.append((source_key, target_key))
+        self.objects[target_key] = self.objects[source_key]
+
+    def create_multipart(self, key, *, content_type):
+        upload_id = f"upload-{len(self.multipart) + 1}"
+        self.multipart[upload_id] = {"key": key, "content_type": content_type, "parts": {}}
+        return upload_id
+
+    def presign_part(self, key, upload_id, number, *, expires_in):
+        return f"http://storage.invalid/{key}?uploadId={upload_id}&partNumber={number}"
+
+    def complete_multipart(self, key, upload_id, parts):
+        entry = self.multipart.pop(upload_id)
+        self.objects[key] = b"".join(
+            entry["parts"][part["PartNumber"]] for part in parts
+        )
+
+    def abort_multipart(self, key, upload_id):
+        self.multipart.pop(upload_id, None)
+        self.aborted.append(upload_id)
 
     def delete(self, key):
         self.objects.pop(key, None)
@@ -178,11 +224,19 @@ def pair(client_factory):
     return alice, bob, start_direct(alice, "bob")
 
 
-def request_target(client, conversation_id, *, content_type="image/png", size=1024, filename="photo.png"):
-    return client.post(
-        f"/conversations/{conversation_id}/attachments",
-        json={"filename": filename, "content_type": content_type, "size_bytes": size},
-    )
+def request_target(
+    client,
+    conversation_id,
+    *,
+    content_type="image/png",
+    size=1024,
+    filename="photo.png",
+    checksum_sha256=None,
+):
+    body = {"filename": filename, "content_type": content_type, "size_bytes": size}
+    if checksum_sha256 is not None:
+        body["checksum_sha256"] = checksum_sha256
+    return client.post(f"/conversations/{conversation_id}/attachments", json=body)
 
 
 def deliver(client, storage, conversation_id, *, payload, **target_kwargs):
@@ -216,6 +270,28 @@ def test_only_participants_can_download(client_factory, storage, scanner):
     # id that does not exist.
     assert outsider.get(f"/attachments/{attachment_id}/download").status_code == 404
     assert outsider.get("/attachments/00000000-0000-0000-0000-000000000000/download").status_code == 404
+
+
+def test_download_answers_a_matching_etag_without_resending_bytes(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    url = f"/attachments/{body['attachment_id']}/download"
+
+    first = alice.get(url)
+    assert first.status_code == 200
+    etag = first.headers["etag"]
+    assert etag
+    # Attachment content is immutable, so a reader keeps it instead of asking again.
+    assert "immutable" in first.headers["cache-control"]
+
+    revalidated = alice.get(url, headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.headers["etag"] == etag
+    assert revalidated.content == b""
+
+    changed = alice.get(url, headers={"If-None-Match": '"something-else"'})
+    assert changed.status_code == 200
 
 
 def acknowledge(client, attachment_id):
@@ -665,5 +741,257 @@ def test_download_uses_an_attachment_disposition_for_non_images(client_factory, 
     # A non-inline response is a download, so it runs under the application policy rather
     # than the narrower sandbox policy that inline media gets.
     assert "default-src 'self'" in response.headers["content-security-policy"]
+
+
+def test_a_large_image_gets_a_preview_and_the_original_is_still_downloaded(
+    client_factory, storage, scanner
+):
+    alice, bob, conversation_id = pair(client_factory)
+    payload = noisy_png_bytes()
+    body, finalized = deliver(alice, storage, conversation_id, payload=payload)
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+    preview_key = f"{key}/thumb.webp"
+
+    # A derivative exists, it is smaller than the original, and the payload points at it.
+    assert preview_key in storage.objects
+    assert len(storage.objects[preview_key]) < len(storage.objects[key])
+    assert finalized.json()["thumbnail_url"] == (
+        f"/attachments/{body['attachment_id']}/thumbnail"
+    )
+
+    preview = alice.get(f"/attachments/{body['attachment_id']}/thumbnail")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/webp"
+    assert "immutable" in preview.headers["cache-control"]
+    etag = preview.headers["etag"]
+    assert bob.get(
+        f"/attachments/{body['attachment_id']}/thumbnail",
+        headers={"If-None-Match": etag},
+    ).status_code == 304
+
+    # The original is untouched: the preview is a rendering hint, not a replacement.
+    original = alice.get(f"/attachments/{body['attachment_id']}/download")
+    assert original.status_code == 200
+    assert original.content == storage.objects[key]
+
+    # Releasing the file takes the derivative with it.
+    assert acknowledge(bob, body["attachment_id"]).json()["released"] is True
+    assert key not in storage.objects
+    assert preview_key not in storage.objects
+    assert alice.get(f"/attachments/{body['attachment_id']}/thumbnail").status_code == 404
+
+
+def test_a_small_image_does_not_get_a_derivative(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    assert finalized.json()["thumbnail_url"] is None
+    assert alice.get(f"/attachments/{body['attachment_id']}/thumbnail").status_code == 404
+
+
+def test_a_repeat_upload_is_copied_in_storage_instead_of_sent_again(
+    client_factory, storage, scanner
+):
+    alice, bob, conversation_id = pair(client_factory)
+    payload = png_bytes()
+    checksum = hashlib.sha256(payload).hexdigest()
+    body, finalized = deliver(
+        alice, storage, conversation_id, payload=payload, checksum_sha256=checksum
+    )
+    assert finalized.status_code == 200
+    assert body["multipart"] is None
+    presigned_before = len(storage.targets)
+
+    second = request_target(
+        alice, conversation_id, size=len(payload), checksum_sha256=checksum
+    )
+    assert second.status_code == 201
+    copied = second.json()
+    assert copied["reused"] is True
+    assert copied["upload_url"] == ""
+    # The client sends nothing, and storage did the work.
+    assert len(storage.targets) == presigned_before
+    assert storage.copies[-1] == (body["fields"]["key"], f"attachments/conversation/{conversation_id}/{copied['attachment_id']}")
+
+    # The copy is already verified, so it downloads without a finalize round trip.
+    download = alice.get(f"/attachments/{copied['attachment_id']}/download")
+    assert download.status_code == 200
+    assert download.content == storage.objects[body["fields"]["key"]]
+
+    # A different digest, or a different account, is an ordinary upload.
+    other_digest = request_target(
+        alice, conversation_id, size=len(payload), checksum_sha256="0" * 64
+    )
+    assert other_digest.json()["reused"] is False
+    assert other_digest.json()["upload_url"]
+
+    bobs = request_target(
+        bob, conversation_id, size=len(payload), checksum_sha256=checksum
+    )
+    assert bobs.json()["reused"] is False
+
+
+def test_dedupe_matches_the_bytes_that_were_sent_not_the_reencoded_copy(
+    client_factory, storage, scanner
+):
+    alice, _bob, conversation_id = pair(client_factory)
+    payload = noisy_jpeg_with_exif()
+    checksum = hashlib.sha256(payload).hexdigest()
+    body, finalized = deliver(
+        alice,
+        storage,
+        conversation_id,
+        payload=payload,
+        content_type="image/jpeg",
+        filename="photo.jpg",
+        checksum_sha256=checksum,
+    )
+    assert finalized.status_code == 200
+    stored = storage.objects[body["fields"]["key"]]
+    assert stored != payload, "the image pipeline is expected to re-encode this upload"
+
+    second = request_target(
+        alice,
+        conversation_id,
+        content_type="image/jpeg",
+        filename="photo.jpg",
+        size=len(payload),
+        checksum_sha256=checksum,
+    )
+    copied = second.json()
+    assert copied["reused"] is True, copied
+
+    # The derivative travelled with the original, so a copied upload still previews cheaply.
+    sources = [source for source, _target in storage.copies]
+    assert body["fields"]["key"] in sources
+    assert f"{body['fields']['key']}/thumb.webp" in sources
+    download = alice.get(f"/attachments/{copied['attachment_id']}/thumbnail")
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "image/webp"
+
+
+def test_a_large_upload_is_split_into_parts_and_assembled(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    payload = b"%PDF-1.7\n" + b"x" * (9 * 1024 * 1024)
+    target = request_target(
+        alice,
+        conversation_id,
+        content_type="application/pdf",
+        size=len(payload),
+        filename="report.pdf",
+    )
+    assert target.status_code == 201
+    body = target.json()
+    assert body["multipart"] == {"part_size": 8 * 1024 * 1024, "part_count": 2}
+
+    started = alice.post(f"/attachments/{body['attachment_id']}/multipart")
+    assert started.status_code == 200
+    session = started.json()
+    assert [part["number"] for part in session["parts"]] == [1, 2]
+    assert session["parts"][0] == {
+        "number": 1,
+        "offset": 0,
+        "size": 8 * 1024 * 1024,
+        "url": session["parts"][0]["url"],
+    }
+    assert session["parts"][1]["offset"] == 8 * 1024 * 1024
+    assert session["parts"][1]["size"] == len(payload) - 8 * 1024 * 1024
+
+    # Asking again resumes the same upload rather than starting a second one.
+    resumed = alice.post(f"/attachments/{body['attachment_id']}/multipart")
+    assert resumed.json()["upload_id"] == session["upload_id"]
+    assert len(storage.multipart) == 1
+
+    # An incomplete part list is refused while the upload is still open.
+    incomplete = alice.post(
+        f"/attachments/{body['attachment_id']}/multipart/complete",
+        json={"parts": [{"number": 1, "etag": '"one"'}]},
+    )
+    assert incomplete.status_code == 422
+
+    entry = storage.multipart[session["upload_id"]]
+    for part in session["parts"]:
+        entry["parts"][part["number"]] = payload[
+            part["offset"] : part["offset"] + part["size"]
+        ]
+
+    completed = alice.post(
+        f"/attachments/{body['attachment_id']}/multipart/complete",
+        json={
+            "parts": [
+                {"number": part["number"], "etag": f'"etag-{part["number"]}"'}
+                for part in session["parts"]
+            ]
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["size_bytes"] == len(payload)
+    assert completed.json()["kind"] == "document"
+    assert storage.objects[body["fields"]["key"]] == payload
+    assert storage.multipart == {}
+
+    # A replay after the parts are assembled only owes the verification, which is idempotent.
+    replay = alice.post(
+        f"/attachments/{body['attachment_id']}/multipart/complete",
+        json={"parts": [{"number": 1, "etag": '"one"'}]},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["size_bytes"] == len(payload)
+
+
+def test_deleting_a_community_removes_its_post_media_objects(
+    client_factory, storage, scanner, database_factory
+):
+    alice, _bob, _conversation_id = pair(client_factory)
+    payload = noisy_png_bytes()
+    target = alice.post(
+        "/posts/media",
+        json={
+            "filename": "photo.png",
+            "content_type": "image/png",
+            "size_bytes": len(payload),
+        },
+    )
+    assert target.status_code == 201
+    body = target.json()
+    key = body["fields"]["key"]
+    preview_key = f"{key}/thumb.webp"
+    storage.objects[key] = payload
+    finalized = alice.post(f"/attachments/{body['attachment_id']}/finalize")
+    assert finalized.status_code == 200
+    assert preview_key in storage.objects
+
+    with database_factory() as database:
+        author = database.scalar(select(User).where(User.username == "alice"))
+        community = Community(
+            name="Disposable",
+            slug="disposable-media",
+            description="",
+            visibility="public",
+            created_by=author.id,
+        )
+        database.add(community)
+        database.flush()
+        post = Post(
+            community_id=community.id,
+            author_id=author.id,
+            title="With media",
+            body="",
+        )
+        database.add(post)
+        database.flush()
+        database.get(Attachment, UUID(body["attachment_id"])).post_id = post.id
+        database.commit()
+
+        # A community is deleted with a bulk query, so its rows cascade but its objects do not.
+        delete_unowned_community(database, database.get(Community, community.id))
+        database.commit()
+
+    assert key not in storage.objects
+    assert preview_key not in storage.objects
+    with database_factory() as database:
+        assert database.scalar(select(func.count()).select_from(Post)) == 0
+        assert database.scalar(select(func.count()).select_from(Attachment)) == 0
 
 

@@ -59,6 +59,11 @@ class Attachment(Base):
         ),
         UniqueConstraint("object_key", name="uq_attachment_object_key"),
         Index("ix_attachments_owner_state", "owner_user_id", "scan_state"),
+        Index(
+            "ix_attachments_owner_source_checksum",
+            "owner_user_id",
+            "source_checksum_sha256",
+        ),
         Index("ix_attachments_message", "message_id"),
         Index("ix_attachments_post", "post_id"),
         Index("ix_attachments_scope_created", "scope_type", "scope_id", "created_at"),
@@ -78,11 +83,20 @@ class Attachment(Base):
         ForeignKey("posts.id", ondelete="CASCADE"), nullable=True
     )
     object_key: Mapped[str] = mapped_column(String(255))
+    # A small WebP derivative of an image, stored beside the original. Nullable: not every
+    # image earns one, and every row written before this column existed has none.
+    thumbnail_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Set while an S3 multipart upload is in flight so it can be completed or aborted rather
+    # than left as unreachable parts.
+    multipart_upload_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_filename: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     declared_mime_type: Mapped[str] = mapped_column(String(120))
     detected_mime_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     declared_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # The digest of the bytes as received. A client's digest of the same file is matched
+    # against this to answer a repeat upload with a copy instead of another transfer.
+    source_checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scan_state: Mapped[str] = mapped_column(
         String(16), default=PENDING_UPLOAD, nullable=False

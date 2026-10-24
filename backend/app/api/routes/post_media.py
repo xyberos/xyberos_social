@@ -18,7 +18,7 @@ from app.core.database import get_db
 from app.core.scoping import account_scope
 from app.core.security import check_rate_limit
 from app.models import User
-from app.schemas.attachments import UploadTargetRequest, UploadTargetResponse
+from app.schemas.attachments import UploadTargetRequest
 from app.services import attachments as attachment_service
 from app.services import idempotency
 
@@ -60,6 +60,7 @@ def create_post_media_target(
                 payload.content_type.strip().lower(),
                 payload.size_bytes,
                 payload.filename,
+                payload.checksum_sha256 or "",
             ),
         )
         if reservation.replay is not None and reservation.replay.body is not None:
@@ -76,15 +77,9 @@ def create_post_media_target(
         declared_mime_type=payload.content_type,
         size_bytes=payload.size_bytes,
         filename=payload.filename,
+        checksum_sha256=payload.checksum_sha256,
     )
-    body = UploadTargetResponse(
-        attachment_id=str(target.attachment_id),
-        upload_url=target.upload_url,
-        fields=target.fields,
-        expires_in=target.expires_in,
-        max_bytes=target.max_bytes,
-        max_attachments=target.max_attachments,
-    ).model_dump()
+    body = attachment_service.upload_target_payload(target).model_dump()
     if reservation is not None:
         idempotency.complete(database, reservation, status_code=201, body=body)
     database.commit()

@@ -61,12 +61,17 @@
     return `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  async function requestTarget(file) {
+  async function requestTarget(file, checksum) {
     const response = await fetch("/posts/media", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": newIdempotencyKey() },
       credentials: "same-origin",
-      body: JSON.stringify({ filename: file.name, content_type: file.type, size_bytes: file.size }),
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type,
+        size_bytes: file.size,
+        checksum_sha256: checksum || undefined,
+      }),
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -75,23 +80,11 @@
     return response.json();
   }
 
-  function sendToStorage(target, file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const body = new FormData();
-      Object.entries(target.fields).forEach(([name, value]) => body.append(name, value));
-      body.append("file", file);
-      const upload = new XMLHttpRequest();
-      upload.open("POST", target.upload_url);
-      upload.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) onProgress(event.loaded / event.total);
-      });
-      upload.addEventListener("load", () => {
-        if (upload.status >= 200 && upload.status < 300) resolve();
-        else reject(new Error("The upload did not reach storage."));
-      });
-      upload.addEventListener("error", () => reject(new Error("The upload failed.")));
-      upload.send(body);
-    });
+  // The digest lets the server answer with a copy of bytes this account already stored
+  // instead of receiving the same file twice. It is best effort: no digest, normal upload.
+  async function checksumFor(file) {
+    const digest = globalThis.SocialMediaOptimize?.sha256;
+    return digest ? digest(file) : null;
   }
 
   async function finalize(attachmentId) {
@@ -176,7 +169,7 @@
   function track(entry, file, kind) {
     pending.add(entry);
     const work = (async () => {
-      const target = await requestTarget(file);
+      const target = await requestTarget(file, await checksumFor(file));
       if (entry.cancelled) return;
       entry.attachmentId = target.attachment_id;
       const ceiling = limits[kind];
@@ -185,13 +178,23 @@
           `${KINDS[kind]} files are limited to ${megabytes(ceiling)} MB.`,
         );
       }
-      await sendToStorage(target, file, (fraction) => {
-        entry.fill.style.width = `${Math.round(fraction * 100)}%`;
-        entry.detail.textContent = `${KINDS[kind]} · uploading ${Math.round(fraction * 100)}%`;
-      });
-      if (entry.cancelled) return;
-      entry.detail.textContent = `${KINDS[kind]} · checking`;
-      const verified = await finalize(target.attachment_id);
+      let verified;
+      if (target.reused) {
+        // Storage already holds these bytes for this account, verified: nothing to send.
+        entry.detail.textContent = `${KINDS[kind]} · already stored`;
+        verified = { id: target.attachment_id, size_bytes: file.size };
+      } else {
+        const upload = globalThis.SocialMediaOptimize?.uploadFile;
+        if (!upload) throw new Error("This browser cannot upload files.");
+        const result = await upload(target, file, (fraction) => {
+          entry.fill.style.width = `${Math.round(fraction * 100)}%`;
+          entry.detail.textContent = `${KINDS[kind]} · uploading ${Math.round(fraction * 100)}%`;
+        });
+        if (entry.cancelled) return;
+        entry.detail.textContent = `${KINDS[kind]} · checking`;
+        // A split upload is verified when its last part is assembled.
+        verified = result.finalized || (await finalize(target.attachment_id));
+      }
       if (entry.cancelled) return;
       entry.fill.style.width = "100%";
       entry.fill.classList.add("is-done");
@@ -226,7 +229,11 @@
     setStatus("");
     const files = Array.from(input.files || []);
     input.value = "";
-    for (const file of files) {
+    for (const original of files) {
+      // A photo that will render at feed size does not need to be uploaded at phone-camera
+      // size; the shrink returns the original when it cannot do better.
+      const shrink = globalThis.SocialMediaOptimize?.shrinkImage;
+      const file = shrink ? await shrink(original) : original;
       const kind = kindOf(file);
       if (!kind) {
         setStatus(`"${file.name}" is not a photo, video, or audio file this composer accepts.`);

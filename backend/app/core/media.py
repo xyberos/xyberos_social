@@ -25,6 +25,14 @@ from PIL import Image, UnidentifiedImageError
 MAX_IMAGE_PIXELS = 40_000_000
 READ_CHUNK = 64 * 1024
 
+# A preview is shown at bubble or tile size, so 640 px on the long edge covers a retina tile
+# while costing a fraction of the original. The derivative is only kept when it saves enough
+# bytes to justify a second object.
+THUMBNAIL_MAX_EDGE = 640
+THUMBNAIL_QUALITY = 80
+THUMBNAIL_MIN_SAVING_BYTES = 16 * 1024
+THUMBNAIL_MIME = "image/webp"
+
 # Enough of a container header to name it: sniffing reads the first box, and an EBML DocType
 # sits inside the first few hundred bytes.
 SAMPLE_BYTES = 512 * 1024
@@ -185,3 +193,36 @@ def strip_image_metadata(data: bytes, mime: str) -> bytes:
             return buffer.getvalue()
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as error:
         raise UnsupportedMedia("the image could not be normalized") from error
+
+
+def render_thumbnail(data: bytes, mime: str) -> bytes | None:
+    """A small WebP preview of already-verified bytes, or `None` when one would not help.
+
+    This runs on the normalized payload, never on the raw upload: the pixels have already been
+    re-encoded once, so the derivative inherits the stripped metadata and the same verdict.
+    A preview that is not meaningfully smaller than the original is not stored at all — the
+    caller falls back to the original image.
+    """
+    if kind_for(mime) != IMAGE:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            if image.mode not in {"RGB", "RGBA"}:
+                has_alpha = image.mode in {"LA", "PA"} or "transparency" in image.info
+                image = image.convert("RGBA" if has_alpha else "RGB")
+            longest = max(image.size)
+            scale = min(1.0, THUMBNAIL_MAX_EDGE / longest)
+            if scale < 1.0:
+                image = image.resize(
+                    (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            buffer = io.BytesIO()
+            image.save(buffer, format="WEBP", quality=THUMBNAIL_QUALITY, method=4)
+            thumbnail = buffer.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        return None
+    if len(data) - len(thumbnail) < THUMBNAIL_MIN_SAVING_BYTES:
+        return None
+    return thumbnail
