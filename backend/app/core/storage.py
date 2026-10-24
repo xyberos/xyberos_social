@@ -64,6 +64,11 @@ class ObjectStorage:
             aws_secret_access_key=secret_access_key,
             config=BotoClientConfig(
                 signature_version="s3v4",
+                # A storage service that accepts the connection and then never answers must not
+                # hold a request, or the startup check, open indefinitely.
+                connect_timeout=5,
+                read_timeout=15,
+                retries={"max_attempts": 2},
                 # MinIO and most self-hosted gateways only serve path-style requests.
                 s3={"addressing_style": "path" if use_path_style else "auto"},
             ),
@@ -85,6 +90,10 @@ class ObjectStorage:
                 logger.info("created bucket", extra={"event": "storage.bucket_created"})
             except (BotoCoreError, ClientError) as error:
                 raise StorageError(f"could not create bucket {self.bucket!r}") from error
+        except BotoCoreError as error:
+            # The service itself is unreachable, which is a different failure from a missing
+            # bucket and must not be mistaken for one.
+            raise StorageError(f"could not reach object storage for {self.bucket!r}") from error
         if cors_origins:
             self.apply_cors(cors_origins)
 

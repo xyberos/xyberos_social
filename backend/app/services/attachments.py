@@ -697,6 +697,18 @@ def open_object(attachment: Attachment, *, start: int = 0, length: int | None = 
     return iter([payload[start:end]])
 
 
+def measured_size(attachment: Attachment) -> int | None:
+    """The size storage actually reports for this object, or `None` when it is not there.
+
+    A download declares `Content-Length`, and a response whose body is shorter than that is a
+    protocol violation: the connection is cut rather than the reader being told anything. The
+    row records the size the pipeline verified, but storage is what will answer, so the two are
+    compared before the headers are written.
+    """
+    stored = get_storage().head(attachment.object_key)
+    return stored.size if stored is not None else None
+
+
 def open_thumbnail(attachment: Attachment):
     """Stream the preview derivative. It is small, so it is never a range read."""
     if not attachment.thumbnail_key:

@@ -1,12 +1,13 @@
 """Liveness, readiness, and the metrics scrape endpoint."""
 
 import logging
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.core.database import engine, get_db
+from app.api.deps import authenticated_user
 from app.core.metrics import gauge, registry, uptime_seconds
 from app.models import IdempotencyKey, OutboxEvent
 from app.services.attachments import pending_upload_count
@@ -15,6 +16,16 @@ from app.services.calls import active_call_totals
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+@router.get("/api/live/revision", include_in_schema=False)
+def live_revision(request: Request, database: Session = Depends(get_db)):
+    """A content free revision so every worker can notice committed outbox activity."""
+    user = authenticated_user(request, database)
+    if user is None:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    revision = database.scalar(select(func.count()).select_from(OutboxEvent)) or 0
+    return {"revision": revision}
 
 _POOL_STATES = (
     ("size", "size"),

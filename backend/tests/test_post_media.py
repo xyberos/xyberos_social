@@ -12,7 +12,7 @@ from uuid import UUID
 import pytest
 
 from conftest import create_account, csrf_from
-from test_attachments import FakeStorage, png_bytes
+from test_attachments import FakeStorage, noisy_png_bytes, png_bytes
 
 from app.core.config import Settings
 from app.models import Attachment
@@ -399,14 +399,18 @@ def test_a_media_post_is_named_in_the_places_that_list_posts(client_factory, sto
     media = upload(alice, storage, png_bytes())
     publish(alice, attachment_ids=[media["id"]])
 
+    # A listed post carries the photo itself as a tile, not only a link to the post.
     dashboard = alice.get("/dashboard")
     assert dashboard.status_code == 200
-    assert "post-media-peek" in dashboard.text
-    assert "1 file" in dashboard.text
+    assert "post-media-gallery post-media-count-1" in dashboard.text
+    assert "data-gallery" in dashboard.text
+    assert "data-gallery-item" in dashboard.text
+    assert f'href="/attachments/{media["id"]}/download"' in dashboard.text
 
     workspace = alice.get("/workspace")
     assert workspace.status_code == 200
     assert "Photo update" in workspace.text
+    assert "post-media-count-1" in workspace.text
 
 
 def test_the_post_records_its_media(client_factory, storage, database_factory):
@@ -421,3 +425,40 @@ def test_the_post_records_its_media(client_factory, storage, database_factory):
         assert attachment.post_id == post_id
         assert attachment.scope_type == "account"
         assert attachment.checksum_sha256
+
+
+def test_a_photo_is_a_tile_that_loads_its_preview_and_links_the_original(
+    client_factory, storage
+):
+    alice = client_factory()
+    assert create_account(alice, "alice@example.com", "alice").status_code == 303
+    media = upload(alice, storage, noisy_png_bytes())
+    published = publish(alice, body="One photo", attachment_ids=[media["id"]])
+
+    page = alice.get(published.headers["location"])
+    assert page.status_code == 200
+    assert "post-media-gallery post-media-count-1" in page.text
+    assert 'data-gallery' in page.text
+    # The tile renders the preview and the link still names the original.
+    assert f'src="/attachments/{media["id"]}/thumbnail"' in page.text
+    assert f'href="/attachments/{media["id"]}/download"' in page.text
+    assert f'data-full="/attachments/{media["id"]}/download"' in page.text
+    # Without the viewer, the link opens the original in a new tab.
+    assert 'target="_blank"' in page.text
+    assert 'src="/static/js/gallery.js"' in page.text
+
+
+def test_three_photos_lay_out_as_a_lead_tile_with_two_alongside(client_factory, storage):
+    alice = client_factory()
+    assert create_account(alice, "alice@example.com", "alice").status_code == 303
+    ids = [
+        upload(alice, storage, png_bytes(), filename=f"photo-{index}.png")["id"]
+        for index in range(3)
+    ]
+    published = publish(alice, body="Three photos", attachment_ids=ids)
+
+    page = alice.get(published.headers["location"])
+    assert page.status_code == 200
+    assert "post-media-gallery post-media-count-3" in page.text
+    assert page.text.count("data-gallery-item") == 3
+    assert page.text.count("post-media-tile") == 3

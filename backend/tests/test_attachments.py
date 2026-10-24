@@ -294,6 +294,46 @@ def test_download_answers_a_matching_etag_without_resending_bytes(client_factory
     assert changed.status_code == 200
 
 
+def test_a_download_declares_the_size_storage_will_deliver(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    key = body["fields"]["key"]
+    url = f"/attachments/{body['attachment_id']}/download"
+    intact = len(storage.objects[key])
+
+    # Storage now holds fewer bytes than the row recorded. Declaring the row's number would
+    # make the response a protocol violation ("content shorter than Content-Length").
+    storage.objects[key] = storage.objects[key][:10]
+
+    response = alice.get(url)
+    assert response.status_code == 200
+    assert response.headers["content-length"] == "10"
+    assert response.content == storage.objects[key]
+    assert intact > 10
+
+    ranged = alice.get(url, headers={"Range": "bytes=5-9"})
+    assert ranged.status_code == 206
+    assert ranged.headers["content-length"] == "5"
+    assert ranged.headers["content-range"] == "bytes 5-9/10"
+
+    beyond = alice.get(url, headers={"Range": "bytes=50-"})
+    assert beyond.status_code == 416
+    assert beyond.headers["content-range"] == "bytes */10"
+
+
+def test_a_download_of_a_missing_object_is_a_clean_not_found(client_factory, storage, scanner):
+    alice, _bob, conversation_id = pair(client_factory)
+    body, finalized = deliver(alice, storage, conversation_id, payload=png_bytes())
+    assert finalized.status_code == 200
+    del storage.objects[body["fields"]["key"]]
+
+    response = alice.get(f"/attachments/{body['attachment_id']}/download")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Attachment not found."
+
+
 def acknowledge(client, attachment_id):
     """What the reader's page posts once it has stored its own copy."""
     page = client.get("/dashboard")

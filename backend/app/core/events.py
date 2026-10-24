@@ -15,6 +15,8 @@ MAX_EVENT_NAME_LENGTH = 64
 
 # Identity and account lifecycle.
 ACCOUNT_DELETED = "account.deleted"
+ACCOUNT_PROFILE_CHANGED = "account.profile.changed"
+SOCIAL_RELATIONSHIP_CHANGED = "social.relationship.changed"
 
 # Communities and their membership.
 COMMUNITY_CREATED = "community.created"
@@ -51,6 +53,8 @@ CALL_ENDED = "call.ended"
 
 SOCIAL_EVENTS = (
     ACCOUNT_DELETED,
+    ACCOUNT_PROFILE_CHANGED,
+    SOCIAL_RELATIONSHIP_CHANGED,
     COMMUNITY_CREATED,
     COMMUNITY_DELETED,
     COMMUNITY_MEMBER_INVITED,

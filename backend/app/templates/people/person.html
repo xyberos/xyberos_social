@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/post_media.html" import show_post_media %}
 {% block title %}{{ person.display_name }} | Social+{% endblock %}
 {% block content %}
 <section class="directory-layout">
   <a class="back-link" href="/people">← People</a>
-  {{ page_heading('Person', person.display_name, '@' ~ person.username ~ (' · ' ~ person.bio if person.bio else '')) }}
+  {{ page_heading('Person', person.display_name, '@' ~ person.username ~ ' · Member since ' ~ person.created_at.strftime('%B %Y') ~ (' · ' ~ person.bio if person.bio else '')) }}
   {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
   <div class="person-actions">
     {% if blocked %}
@@ -34,22 +35,24 @@
   </div>
 
   <section class="posts-section" aria-labelledby="person-updates-title">
-    <div class="section-heading"><div><p class="eyebrow">Their own page</p><h2 id="person-updates-title">Updates</h2></div></div>
+    <div class="section-heading"><div><p class="eyebrow">Their own page</p><h2 id="person-updates-title">Posts</h2></div></div>
     {% if posts %}
       <div class="post-list">
         {% for post in posts %}
           <article class="post-row">
+            {% set post_media = media.get(post.id, []) if media else [] %}
             <div class="post-head">
               <div class="post-avatar" aria-hidden="true">{{ person.display_name[:1]|upper }}</div>
               <div class="post-byline">
                 <span class="post-author">{{ person.display_name }}</span>
-                <p class="post-meta"><time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span>Personal update</span></p>
+                <p class="post-meta"><time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>{% if post.community_id %}<span>Community · {{ communities[post.id].name }}</span>{% else %}<span>Personal update</span>{% endif %}</p>
               </div>
             </div>
-            <h3><a href="/posts/{{ post.id }}">{{ post.title or post.body[:80] or 'Photo update' }}</a></h3>
+            <h3><a href="{{ '/communities/' ~ communities[post.id].slug ~ '/posts/' ~ post.id if post.community_id else '/posts/' ~ post.id }}">{{ post.title or post.body[:80] or 'Photo update' }}</a></h3>
             {% if post.title and post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
+            {{ show_post_media(post_media) }}
             <div class="post-actions">
-              <a class="post-action" href="/posts/{{ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comments</a>
+              <a class="post-action" href="{{ '/communities/' ~ communities[post.id].slug ~ '/posts/' ~ post.id if post.community_id else '/posts/' ~ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comments</a>
             </div>
           </article>
         {% endfor %}

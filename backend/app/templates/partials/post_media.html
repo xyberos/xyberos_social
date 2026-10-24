@@ -1,17 +1,24 @@
 {# A post's media, rendered from the metadata the pipeline verified: nothing here is a storage
    URL, every source goes back through the authorized download route, and each element is the
-   one its kind deserves — a gallery for photos, a player for a clip or a track, a link for
-   anything else. #}
+   one its kind deserves — a tiled gallery for photos, a player for a clip or a track, a link
+   for anything else.
+
+   The gallery is a tile grid laid out by how many photos the post carries (one large, two or
+   four as squares, three as a tall lead with two stacked beside it). Each tile is a real link
+   to the original, so it still opens without JavaScript; `data-gallery` is what lets
+   `static/js/gallery.js` open the same original in a dialog instead. #}
 {% macro show_post_media(items) %}
   {% if items %}
     {% set images = items | selectattr('kind', 'equalto', 'image') | list %}
     {% set others = items | rejectattr('kind', 'equalto', 'image') | list %}
     <div class="post-media">
       {% if images %}
-        <ul class="post-media-gallery{{ ' post-media-single' if images|length == 1 else '' }}">
+        <ul class="post-media-gallery post-media-count-{{ images|length if images|length <= 4 else 4 }}" data-gallery>
           {% for item in images %}
-            <li>
-              <a class="post-media-image" href="{{ item.download_url }}" target="_blank" rel="noopener">
+            <li class="post-media-tile">
+              <a class="post-media-image" href="{{ item.download_url }}" target="_blank" rel="noopener"
+                 data-gallery-item data-full="{{ item.download_url }}"
+                 aria-label="Open {{ item.filename }} at full size">
                 <img src="{{ item.thumbnail_url or item.download_url }}" alt="{{ item.filename }}" loading="lazy" decoding="async">
               </a>
             </li>

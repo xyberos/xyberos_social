@@ -22,6 +22,7 @@ from app.core.theme import THEME_CHOICES
 from app.core import events
 from app.core.database import get_db
 from app.core.scoping import account_scope
+from app.core.scoping import platform_scope
 from app.models import (
     Comment,
     Community,
@@ -41,6 +42,7 @@ from app.models import (
     UserSession,
 )
 from app.core.security import hash_password, new_token, verify_password
+from app.services import attachments as attachment_service
 from app.services.attachments import delete_attachments_for_owner
 from app.services.audit import record_audit
 from app.services.communities import delete_unowned_community, record_community_audit
@@ -95,6 +97,9 @@ def workspace_page(
             user=user,
             source=source,
             posts=posts,
+            media=attachment_service.post_media_payloads(
+                database, [post.id for post, _community, _openable in posts if not post.removed_at]
+            ),
             count=len(posts),
             total=workspace.count_posts(database, user.id, source),
             next_cursor=next_cursor,
@@ -130,6 +135,14 @@ def update_profile(
         )
     user.display_name = display_name
     user.bio = bio
+    enqueue_event(
+        database,
+        event=events.ACCOUNT_PROFILE_CHANGED,
+        aggregate_type="user",
+        aggregate_id=user.id,
+        scope=platform_scope(),
+        payload={"user_id": str(user.id)},
+    )
     database.commit()
     if request.headers.get("HX-Request") == "true":
         return render(request, "partials/profile_saved.html", {"message": "Profile saved."})

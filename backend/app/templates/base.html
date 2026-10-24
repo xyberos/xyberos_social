@@ -18,8 +18,11 @@
     <script defer src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script defer src="/static/js/theme.js"></script>
     <script defer src="/static/js/media-optimize.js"></script>
+    <script defer src="/static/js/people-search.js"></script>
     {% if user is defined and user %}
       <script defer src="/static/js/shell.js"></script>
+      <script defer src="/static/js/site-live.js"></script>
+      <script defer src="/static/js/gallery.js"></script>
     {% endif %}
     {% if conversation_id is defined %}
       <script defer src="/static/js/safety-number.js"></script>

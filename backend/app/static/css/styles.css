@@ -469,6 +469,15 @@ h1, h2, h3 { line-height: 1.2; }
 .directory-layout, .community-layout { width: 100%; max-width: 720px; margin: 0 auto; padding-bottom: 12px; }
 .directory-list, .member-list, .inbox-list, .notification-list { border-radius: var(--radius-card); background: var(--white); box-shadow: var(--card-shadow); overflow: hidden; }
 .directory-row, .community-row, .member-row { min-height: 72px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+.directory-row { position: relative; }
+.directory-row-profile { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
+.directory-row-profile:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -3px; }
+.directory-row > :not(.directory-row-profile) { position: relative; z-index: 1; }
+.directory-row > .person-info { pointer-events: none; }
+.directory-row > .person-info a { pointer-events: auto; }
+.person-actions form, .person-actions button { position: relative; z-index: 2; }
+.people-group { margin-top: 22px; }
+.people-group-title { margin: 0 0 8px; color: var(--muted); font-size: 13px; font-weight: 550; }
 .directory-row:last-child, .community-row:last-child, .member-row:last-child { border-bottom: 0; }
 .community-row { align-items: flex-start; }
 .person-avatar, .community-mark { width: 44px; aspect-ratio: 1; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: var(--avatar-ink); background: var(--avatar-bg); font-size: 18px; font-weight: 450; }
@@ -983,31 +992,109 @@ h1, h2, .page-heading h1, .home-copy h1 { text-wrap: balance; }
 .compose-media-remove:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 
 .post-media { display: grid; gap: 10px; margin: 12px 0 4px; }
+/* A post's photos are a tile grid: one large, two or four as squares, three as a tall lead
+   with two stacked beside it. Each tile is an ordinary link to the original, and
+   static/js/gallery.js upgrades the click to the modal viewer below. */
 .post-media-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 6px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow: hidden;
   border-radius: var(--radius-card);
+  background: var(--chip);
 }
-.post-media-single { grid-template-columns: 1fr; }
+.post-media-tile { min-width: 0; }
 .post-media-image {
   display: block;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  border-radius: var(--radius-card);
   background: var(--chip);
 }
 .post-media-image img {
   display: block;
   width: 100%;
-  max-height: 520px;
+  height: 100%;
   object-fit: cover;
   transition: transform .2s ease;
 }
-.post-media-image:hover img { transform: scale(1.01); }
+.post-media-image:hover img { transform: scale(1.02); }
+
+.post-media-count-1 { grid-template-columns: 1fr; }
+.post-media-count-1 .post-media-image img { max-height: 520px; }
+
+.post-media-count-2 { grid-template-columns: repeat(2, 1fr); }
+.post-media-count-2 .post-media-tile { aspect-ratio: 1 / 1; max-height: 520px; }
+
+.post-media-count-3,
+.post-media-count-4 { aspect-ratio: 3 / 2; max-height: 520px; }
+.post-media-count-3 {
+  grid-template-columns: 1.6fr 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.post-media-count-3 .post-media-tile:first-child { grid-row: span 2; }
+.post-media-count-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+/* The viewer. The dialog covers the viewport, so a click on it is a click on the backdrop. */
+.media-viewer {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(10, 13, 12, .94);
+  color: #f3f6f4;
+}
+.media-viewer[open] { display: grid; place-items: center; }
+.media-viewer::backdrop { background: rgba(0, 0, 0, .7); }
+.media-viewer-figure {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 56px 64px 28px;
+  max-width: 100%;
+}
+.media-viewer-image {
+  max-width: min(1200px, 88vw);
+  max-height: 78vh;
+  object-fit: contain;
+  border-radius: var(--radius-card);
+}
+.media-viewer-caption { font-size: 12px; color: #cdd8d2; }
+.media-viewer-close,
+.media-viewer-prev,
+.media-viewer-next {
+  position: fixed;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, .16);
+  cursor: pointer;
+}
+.media-viewer-close:hover,
+.media-viewer-prev:hover,
+.media-viewer-next:hover { background: rgba(255, 255, 255, .3); }
+.media-viewer-close:focus-visible,
+.media-viewer-prev:focus-visible,
+.media-viewer-next:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.media-viewer-close { top: 16px; right: 16px; }
+.media-viewer-prev { top: 50%; left: 16px; transform: translateY(-50%); }
+.media-viewer-next { top: 50%; right: 16px; transform: translateY(-50%); }
+.media-viewer button[hidden] { display: none; }
 .post-media-video {
   display: block;
   width: 100%;
@@ -1080,8 +1167,28 @@ h1, h2, .page-heading h1, .home-copy h1 { text-wrap: balance; }
 }
 
 @media (max-width: 520px) {
-  .post-media-gallery { grid-template-columns: repeat(2, 1fr); }
-  .post-media-single { grid-template-columns: 1fr; }
+  .post-media-count-1 .post-media-image img { max-height: 380px; }
+  .post-media-count-2,
+  .post-media-count-4 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto;
+    aspect-ratio: auto;
+    max-height: none;
+  }
+  .post-media-count-2 .post-media-tile,
+  .post-media-count-4 .post-media-tile { aspect-ratio: 1 / 1; max-height: none; }
+  .post-media-count-3 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto;
+    aspect-ratio: auto;
+    max-height: none;
+  }
+  .post-media-count-3 .post-media-tile:first-child { grid-row: auto; grid-column: span 2; }
+  .post-media-count-3 .post-media-tile:first-child .post-media-image { aspect-ratio: 2 / 1; }
+  .post-media-count-3 .post-media-tile:not(:first-child) .post-media-image { aspect-ratio: 1 / 1; }
+  .media-viewer-figure { padding: 56px 12px 20px; }
+  .media-viewer-prev { left: 8px; }
+  .media-viewer-next { right: 8px; }
 }
 
 /* ---------------------------------------------------------------------------------------
@@ -1098,3 +1205,6 @@ h1, h2, .page-heading h1, .home-copy h1 { text-wrap: balance; }
     scroll-behavior: auto !important;
   }
 }
+.people-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px 4px 0; color: var(--muted); font-size: 13px; }
+.people-search { margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+.people-search input { min-width: 180px; flex: 1; }

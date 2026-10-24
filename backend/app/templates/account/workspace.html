@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/post_media.html" import show_post_media %}
 {% block title %}Workspace | X-Social{% endblock %}
 {% block content %}
 <section class="workspace-layout">
@@ -23,6 +24,7 @@
       {% for post, community, openable in posts %}
         {% set post_url = '/communities/' ~ community.slug ~ '/posts/' ~ post.id if community else '/posts/' ~ post.id %}
         {% set withdraw_url = '/communities/' ~ community.slug ~ '/posts/' ~ post.id ~ '/remove' if community else '/posts/' ~ post.id ~ '/remove' %}
+        {% set post_media = media.get(post.id, []) if media and not post.removed_at else [] %}
         <article class="workspace-row">
           <div class="workspace-row-meta">
             {% if community %}<a class="workspace-community" href="/communities/{{ community.slug }}">{{ community.name }}</a>
@@ -36,6 +38,7 @@
             {% else %}{{ post.title or post.body[:90] or 'Photo update' }}{% endif %}
           </h2>
           {% if post.title and post.body %}<p class="workspace-excerpt">{{ post.body[:140] }}{% if post.body|length > 140 %}…{% endif %}</p>{% endif %}
+          {{ show_post_media(post_media) }}
           <div class="workspace-row-actions">
             {% if openable %}<a class="text-button" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>Open</a>{% endif %}
             {% if not community and not post.removed_at %}

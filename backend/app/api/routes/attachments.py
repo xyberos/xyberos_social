@@ -10,6 +10,8 @@ sent to has one.
 from urllib.parse import quote
 from uuid import UUID
 
+import logging
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
@@ -30,6 +32,8 @@ from app.services import idempotency
 from app.services.messaging import active_conversation_member
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_LIMIT = 20
 DOWNLOAD_LIMIT = 240
@@ -170,7 +174,7 @@ def download_attachment(
         database, attachment_id=attachment_id, user=user
     )
     media = attachment_service.media_type_for(attachment)
-    size = attachment.size_bytes
+    rows_size = attachment.size_bytes
 
     headers = {
         # Every download states what it is; only allowlisted media may be rendered inline,
@@ -191,6 +195,28 @@ def download_attachment(
             return Response(status_code=304, headers=headers)
     if media.inline:
         headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+
+    # The declared length must be the length storage will actually deliver, or uvicorn cuts the
+    # connection mid-body ("Response content shorter than Content-Length"). The row is metadata;
+    # the object is the answer.
+    try:
+        size = attachment_service.measured_size(attachment)
+    except StorageError:
+        raise HTTPException(
+            status_code=503, detail="The attachment is temporarily unavailable."
+        ) from None
+    if size is None:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    if size != rows_size:
+        logger.warning(
+            "stored object size differs from the recorded size",
+            extra={
+                "event": "attachment.size_mismatch",
+                "attachment_id": str(attachment.id),
+                "recorded_bytes": rows_size,
+                "stored_bytes": size,
+            },
+        )
 
     try:
         requested = attachment_service.parse_byte_range(request.headers.get("range", ""), size)

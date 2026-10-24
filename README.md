@@ -124,17 +124,26 @@ Steps 3-4 run the application on the host interpreter. To run the same applicati
 docker compose up -d --build app     # builds the Dockerfile and serves http://localhost:8010
 ```
 
-Attachment bytes need object storage. Start it and create the bucket once:
+Attachment bytes need object storage:
 
 ```powershell
 docker compose up -d object-storage
+```
+
+Starting the application in development creates the bucket and applies the browser upload rule
+itself (`app.main:lifespan`), because the stand-in service below forgets everything when it
+restarts. To do it by hand — or to prepare a real bucket, which the application never touches on
+its own — run:
+
+```powershell
 $env:PYTHONPATH = "backend"
 .\.venv\Scripts\python.exe -c "from app.core.storage import bootstrap_bucket; print(bootstrap_bucket())"
 ```
 
 That creates the bucket and allows browser uploads from `APP_BASE_URL` (plus both loopback names
 outside production). The CORS rule is not optional: a browser posts attachment bytes straight to
-storage, so without it every upload fails in the browser *after* the bytes have been stored.
+storage, so without it every upload fails in the browser *after* the bytes have been stored. It
+must allow `PUT` as well as `POST`, because a split upload delivers its parts that way.
 
 That service is moto, an S3 API implementation intended for development and CI. It keeps state
 in memory, so attachments do not survive a restart of it, and it does not enforce the upload
@@ -275,7 +284,10 @@ against the quota, which is the one cost of the trade.
 
 Downloads carry a content `ETag`, and `private, max-age=86400, immutable`, so a repeat view is
 answered from the browser or revalidated with a `304` instead of resending the bytes. Previews
-carry their own ETag and the same lifetime.
+carry their own ETag and the same lifetime. A download declares the length storage reports for
+the object at request time, not the length recorded at finalize: if the two disagree (a lost or
+truncated object), the reader gets the bytes that exist with an honest `Content-Length`, or a
+clean `404` when the object is gone, rather than a connection cut mid-body.
 
 Each transition is durable, so a scanner outage leaves an upload in `pending_scan` and tells the
 client to retry instead of promoting unverified bytes. Abandoned uploads are reaped when the

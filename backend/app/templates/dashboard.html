@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
-{% from "partials/post_media.html" import show_media_peek %}
+{% from "partials/post_media.html" import show_post_media %}
 {% block title %}Dashboard | Social+{% endblock %}
 {% block content %}
 <section class="dashboard-layout">
@@ -44,7 +44,7 @@
             <p class="post-excerpt"><a href="{{ post_url }}">{{ post.body[:360] }}{% if post.body|length > 360 %}…{% endif %}</a></p>
           {% endif %}
           {% if post_media %}
-            {{ show_media_peek(post_media, post_url, post_media|length ~ (' file' if post_media|length == 1 else ' files')) }}
+            {{ show_post_media(post_media) }}
           {% endif %}
           <div class="post-actions">
             <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comment</a>

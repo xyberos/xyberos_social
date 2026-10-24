@@ -5,13 +5,25 @@
 <section class="directory-layout">
   {{ page_heading('Your social graph', 'People', 'Choose who to follow. Blocking removes follows in both directions.') }}
   {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
-  <div class="directory-list">
-    {% for person in people %}
+  <form class="people-search" method="get" action="/people" role="search">
+    <label class="visually-hidden" for="people-search">Search people</label>
+    <input id="people-search" type="search" name="search" value="{{ search }}" placeholder="Search by name or username" maxlength="80">
+    <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">search</span>Search</button>
+    {% if search %}<a class="button button-quiet" href="/people">Clear</a>{% endif %}
+  </form>
+  <div id="people-results" aria-live="polite" aria-busy="false">
+  {% for group_title, group_people in [('Following', followed_people), ('Discover people', other_people)] %}
+    {% if group_people %}
+      <section class="people-group" aria-label="{{ group_title }}">
+        <h2 class="people-group-title">{{ group_title }} ({{ followed_count if group_title == 'Following' else others_count }})</h2>
+        <div class="directory-list">
+    {% for person in group_people %}
       <article class="directory-row">
+        <a class="directory-row-profile" href="/people/{{ person.user.id }}" aria-label="View {{ person.user.display_name }}â€™s profile"></a>
         <div class="person-avatar" aria-hidden="true">{{ person.user.display_name[:1]|upper }}</div>
         <div class="person-info">
           <strong><a class="person-link" href="/people/{{ person.user.id }}">{{ person.user.display_name }}</a></strong>
-          <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %}</span>
+          <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %} · Member since {{ person.user.created_at.strftime('%b %Y') }}</span>
         </div>
         <div class="person-actions">
           {% if not person.blocked and not person.blocked_you %}
@@ -41,9 +53,22 @@
           {% endif %}
         </div>
       </article>
-    {% else %}
-      <p class="empty-state">No other accounts yet.</p>
     {% endfor %}
+        </div>
+        {% set current_page = following_page if group_title == 'Following' else others_page %}
+        {% set total_pages = following_pages if group_title == 'Following' else others_pages %}
+        {% if total_pages > 1 %}
+          <nav class="people-pagination" aria-label="{{ group_title }} pages">
+            {% if current_page > 1 %}<a class="button button-quiet" href="/people?search={{ search|urlencode }}&amp;{{ 'following_page' if group_title == 'Following' else 'others_page' }}={{ current_page - 1 }}&amp;{{ 'others_page' if group_title == 'Following' else 'following_page' }}={{ others_page if group_title == 'Following' else following_page }}">Previous</a>{% endif %}
+            <span>Page {{ current_page }} of {{ total_pages }}</span>
+            {% if current_page < total_pages %}<a class="button button-quiet" href="/people?search={{ search|urlencode }}&amp;{{ 'following_page' if group_title == 'Following' else 'others_page' }}={{ current_page + 1 }}&amp;{{ 'others_page' if group_title == 'Following' else 'following_page' }}={{ others_page if group_title == 'Following' else following_page }}">Next</a>{% endif %}
+          </nav>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% else %}
+    <p class="empty-state">{{ 'No people match that search.' if search else 'No other accounts yet.' }}</p>
+  {% endfor %}
   </div>
 </section>
 {% endblock %}
