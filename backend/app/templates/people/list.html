@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/avatar.html" import avatar %}
 {% from "partials/page_heading.html" import page_heading %}
 {% block title %}People | Social+{% endblock %}
 {% block content %}
@@ -15,12 +16,12 @@
   {% for group_title, group_people in [('Following', followed_people), ('Discover people', other_people)] %}
     {% if group_people %}
       <section class="people-group" aria-label="{{ group_title }}">
-        <h2 class="people-group-title">{{ group_title }} ({{ followed_count if group_title == 'Following' else others_count }})</h2>
+        <h2 class="people-group-title">{{ group_title }} <span class="count-chip">{{ followed_count if group_title == 'Following' else others_count }}</span></h2>
         <div class="directory-list">
     {% for person in group_people %}
       <article class="directory-row">
-        <a class="directory-row-profile" href="/people/{{ person.user.id }}" aria-label="View {{ person.user.display_name }}â€™s profile"></a>
-        <div class="person-avatar" aria-hidden="true">{{ person.user.display_name[:1]|upper }}</div>
+        <a class="directory-row-profile" href="/people/{{ person.user.id }}" aria-label="View {{ person.user.display_name }}'s profile"></a>
+        {{ avatar(person.user, 'person-avatar') }}
         <div class="person-info">
           <strong><a class="person-link" href="/people/{{ person.user.id }}">{{ person.user.display_name }}</a></strong>
           <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %} · Member since {{ person.user.created_at.strftime('%b %Y') }}</span>
@@ -29,13 +30,13 @@
           {% if not person.blocked and not person.blocked_you %}
             <form method="post" action="/conversations/direct/{{ person.user.id }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-quiet" type="submit">Message</button>
+              <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span>Message</button>
             </form>
           {% endif %}
           {% if person.blocked %}
             <form method="post" action="/people/{{ person.user.id }}/unblock">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-quiet" type="submit">Unblock</button>
+              <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">lock_open</span>Unblock</button>
             </form>
           {% elif person.blocked_you %}
             <span class="muted-status">They blocked you</span>
@@ -43,12 +44,12 @@
             <form method="post" action="/people/{{ person.user.id }}/{{ 'unfollow' if person.following else 'follow' }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="button {{ 'button-quiet' if person.following else 'button-primary' }}" type="submit">
-                {{ 'Following' if person.following else 'Follow' }}
+                <span class="material-symbols-rounded" aria-hidden="true">{{ 'check' if person.following else 'person_add' }}</span>{{ 'Following' if person.following else 'Follow' }}
               </button>
             </form>
             <form method="post" action="/people/{{ person.user.id }}/block">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="text-button danger-button" type="submit">Block</button>
+              <button class="text-button danger-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">block</span>Block</button>
             </form>
           {% endif %}
         </div>

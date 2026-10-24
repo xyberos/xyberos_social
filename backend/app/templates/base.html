@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="en"{% if theme_effective %} data-theme="{{ theme_effective }}"{% endif %} data-theme-choice="{{ theme_choice }}">
+{% from "partials/avatar.html" import avatar %}
+<html lang="en"{% if theme_effective %} data-theme="{{ theme_effective }}"{% endif %} data-theme-choice="{{ theme_choice }}" data-preset="{{ appearance_preset }}" data-background="{{ background_style }}" data-density="{{ display_density }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -17,6 +18,7 @@
 
     <script defer src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script defer src="/static/js/theme.js"></script>
+    <script defer src="/static/js/appearance.js"></script>
     <script defer src="/static/js/media-optimize.js"></script>
     <script defer src="/static/js/people-search.js"></script>
     {% if user is defined and user %}
@@ -58,7 +60,7 @@
                  navigations, and the shell itself changes — logging out swaps the whole page
                  for the signed-out one, which a #main-content swap would leave half behind. #}
               <details class="account-menu" hx-boost="false">
-                <summary class="topbar-account" title="Your account" aria-label="Your account"><span aria-hidden="true">{{ user.display_name[:1]|upper }}</span></summary>
+                <summary class="topbar-account" title="Your account" aria-label="Your account">{{ avatar(user, 'topbar-avatar') }}</summary>
                 <div class="account-menu-panel">
                   <p class="account-menu-name">{{ user.display_name }}</p>
                   <p class="account-menu-handle">@{{ user.username }}</p>

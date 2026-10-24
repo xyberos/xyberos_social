@@ -5,6 +5,7 @@
    the browser, so without JavaScript nothing uploads and the hint says as much. The form
    itself stays a plain post, and `attachment_ids` arrives as one repeated hidden field per
    verified file. #}
+{% from "partials/avatar.html" import avatar %}
 {% macro post_compose_errors(error) %}
   {% if error == 'invalid-post' %}<p class="alert" role="alert">Write something or attach a photo, video, or track before publishing, up to 10,000 characters of text.</p>{% endif %}
   {% if error == 'invalid-audience' %}<p class="alert" role="alert">Choose who can see this update.</p>{% endif %}
@@ -13,39 +14,60 @@
   {% if error == 'slow-down' %}<p class="alert" role="alert">You are publishing quickly. Wait a moment and try again.</p>{% endif %}
 {% endmacro %}
 
-{% macro post_compose(csrf_token, return_to, field_prefix, rows=4, media=none) %}
-  <form method="post" action="/posts" class="post-compose">
+{% macro post_compose(csrf_token, return_to, field_prefix, user, rows=4, media=none) %}
+  <form method="post" action="/posts" class="post-compose composer">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="return_to" value="{{ return_to }}">
-    <label for="{{ field_prefix }}-title">Title <span class="field-note">optional</span></label>
-    <input id="{{ field_prefix }}-title" name="title" maxlength="140" placeholder="Give the update a headline">
-    <label for="{{ field_prefix }}-body">Text</label>
-    <textarea id="{{ field_prefix }}-body" name="body" rows="{{ rows }}" maxlength="10000" placeholder="Share something, then choose who reads it below."></textarea>
+
+    <header class="composer-head">
+      {{ avatar(user, 'post-avatar composer-avatar') }}
+      <div class="composer-identity">
+        <strong>{{ user.display_name }}</strong>
+        <label class="composer-audience" for="{{ field_prefix }}-audience">
+          <span class="material-symbols-rounded" aria-hidden="true">public</span>
+          <span class="visually-hidden">Who can see this</span>
+          <select id="{{ field_prefix }}-audience" name="audience" aria-describedby="{{ field_prefix }}-audience-help">
+            <option value="followers" selected>Your followers</option>
+            <option value="only_me">Only me</option>
+            <option value="everyone">Everyone on X-Social</option>
+          </select>
+          <span class="material-symbols-rounded composer-chevron" aria-hidden="true">expand_more</span>
+        </label>
+        <p class="visually-hidden" id="{{ field_prefix }}-audience-help">Followers read it on their dashboard. Everyone can also open it from your page under People. Only me keeps it between here and your workspace.</p>
+      </div>
+    </header>
+
+    <div class="composer-body">
+      <label class="visually-hidden" for="{{ field_prefix }}-body">What's on your mind?</label>
+      <textarea id="{{ field_prefix }}-body" name="body" rows="{{ rows }}" maxlength="10000"
+                class="composer-text" placeholder="What's on your mind?" data-composer-text></textarea>
+      <label class="visually-hidden" for="{{ field_prefix }}-title">Headline</label>
+      <input id="{{ field_prefix }}-title" name="title" maxlength="140"
+             class="composer-headline" placeholder="Add a headline (optional)">
+    </div>
+
     <div class="compose-media" data-media-picker
          {% if media %}data-media-max-items="{{ media.max_items }}"
          data-media-max-image="{{ media.image_max_bytes }}"
          data-media-max-video="{{ media.video_max_bytes }}"
          data-media-max-audio="{{ media.audio_max_bytes }}"
          data-media-summary="{{ media.summary }}"{% endif %}>
+      <ul class="compose-media-list" data-media-list></ul>
+      <p class="compose-media-status" role="status" data-media-status></p>
       <div class="compose-media-bar">
         <input id="{{ field_prefix }}-media" class="visually-hidden" type="file" multiple
                {% if media %}accept="{{ media.accept }}"{% endif %} data-media-input>
-        <label class="button button-quiet compose-media-add" for="{{ field_prefix }}-media">
-          <span class="material-symbols-rounded" aria-hidden="true">perm_media</span>Add photo, video, or audio
+        <label class="composer-tool composer-media-add" for="{{ field_prefix }}-media">
+          <span class="composer-tool-icon" aria-hidden="true">
+            <span class="material-symbols-rounded">add_photo_alternate</span>
+          </span>
+          Photo/video
         </label>
-        <span class="field-note" data-media-summary>{% if media %}{{ media.summary }}{% endif %}</span>
+        <span class="field-note composer-summary" data-media-summary{% if media %} title="{{ media.summary }}"{% endif %}>{% if media %}Up to {{ media.max_items }} files{% endif %}</span>
+        <span class="composer-count" data-composer-count hidden></span>
+        <span class="composer-submit">{{ caller() }}</span>
       </div>
-      <p class="compose-media-status" role="status" data-media-status></p>
-      <ul class="compose-media-list" data-media-list></ul>
       <noscript><p class="field-note">Attaching media needs JavaScript in this build. You can still publish text.</p></noscript>
     </div>
-    <label for="{{ field_prefix }}-audience">Who can see this</label>
-    <select id="{{ field_prefix }}-audience" name="audience">
-      <option value="followers" selected>Your followers</option>
-      <option value="only_me">Only me</option>
-      <option value="everyone">Everyone on X-Social</option>
-    </select>
-    <small class="field-note">Followers read it on their dashboard. Everyone can also open it from your page under People. Only me keeps it between here and your workspace.</small>
-    {{ caller() }}
   </form>
 {% endmacro %}

@@ -18,7 +18,7 @@ scanner verdict makes them safe to serve from the application's origin.
 import io
 from dataclasses import dataclass
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 # A 10 MB image can still decode to something that exhausts memory, so the decoded area is
 # bounded before any pixel data is touched.
@@ -184,12 +184,15 @@ def strip_image_metadata(data: bytes, mime: str) -> bytes:
     try:
         with Image.open(io.BytesIO(data)) as image:
             image.load()
+            # The re-encode drops the EXIF block, so the orientation it carried has to be
+            # applied to the pixels first or a phone photo would arrive sideways.
+            upright = ImageOps.exif_transpose(image)
             buffer = io.BytesIO()
             save_options: dict[str, object] = {"format": format_name}
             if format_name in {"JPEG", "WEBP"}:
                 # These plugins copy `info` metadata unless it is explicitly cleared.
                 save_options.update(exif=b"", icc_profile=None)
-            image.save(buffer, **save_options)
+            upright.save(buffer, **save_options)
             return buffer.getvalue()
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as error:
         raise UnsupportedMedia("the image could not be normalized") from error

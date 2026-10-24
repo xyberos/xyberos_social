@@ -76,6 +76,42 @@
           </label>
         {% endfor %}
       </div>
+      <div class="appearance-controls">
+        <fieldset>
+          <legend>Colour theme</legend>
+          <div class="appearance-choice" role="radiogroup">
+            {% for option in appearance_presets %}
+              <label class="appearance-card" data-appearance-preview="preset" data-value="{{ option.value }}">
+                <input type="radio" name="appearance_preset" value="{{ option.value }}" {% if user.appearance_preset == option.value %}checked{% endif %}>
+                <span class="appearance-swatch" aria-hidden="true"></span>
+                <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Background</legend>
+          <div class="appearance-choice" role="radiogroup">
+            {% for option in background_options %}
+              <label class="appearance-card" data-appearance-preview="background" data-value="{{ option.value }}">
+                <input type="radio" name="background_style" value="{{ option.value }}" {% if user.background_style == option.value %}checked{% endif %}>
+                <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Spacing</legend>
+          <div class="appearance-choice" role="radiogroup">
+            {% for option in density_options %}
+              <label class="appearance-card" data-appearance-preview="density" data-value="{{ option.value }}">
+                <input type="radio" name="display_density" value="{{ option.value }}" {% if user.display_density == option.value %}checked{% endif %}>
+                <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+      </div>
     </section>
     <button class="button button-primary settings-save" type="submit"><span class="material-symbols-rounded" aria-hidden="true">save</span>Save settings</button>
   </form>

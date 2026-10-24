@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}{{ peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title }} | Chat | X-Social{% endblock %}
 {% block content %}
 <section class="chat-layout">
@@ -9,7 +10,11 @@
   {% if request.query_params.get('error') == 'group-full' %}<p class="alert" role="alert">Groups are limited to 20 participants.</p>{% endif %}
   <section class="conversation-view" data-conversation-id="{{ conversation.id }}" data-current-user-id="{{ user.id }}" data-kind="{{ conversation.kind }}" data-ice-servers="{{ ice_servers }}"{% if anchor_message_id %} data-anchor-id="{{ anchor_message_id }}"{% endif %} aria-label="Conversation">
     <header class="chat-header">
-      <div class="inbox-avatar" aria-hidden="true">{{ (peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title)[:1]|upper }}</div>
+      {% if conversation.kind == 'direct' and peer %}
+        {{ avatar(peer.user, 'inbox-avatar') }}
+      {% else %}
+        <div class="inbox-avatar" aria-hidden="true">{{ conversation.title[:1]|upper }}</div>
+      {% endif %}
       <div class="chat-header-copy">
         <h1>{{ peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title }}</h1>
         {% if conversation.kind == 'direct' and peer %}<span>@{{ peer.user.username }}</span>

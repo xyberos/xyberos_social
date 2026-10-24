@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
 from app.api.deps import form_context, set_session_cookie, theme_from_cookie
 from app.core.theme import THEME_OPTIONS, THEME_CHOICES, option_for, resolve_theme
+from app.core.appearance import BACKGROUND_OPTIONS, DENSITY_OPTIONS, PRESETS
 from app.models import UserSession
 from app.services.messaging import unread_message_total
 
@@ -45,6 +46,19 @@ def _theme_context(request: Request, context: dict) -> dict:
     }
 
 
+def _appearance_context(context: dict) -> dict:
+    """Expose only server-curated appearance choices to templates."""
+    user = context.get("user")
+    return {
+        "appearance_preset": getattr(user, "appearance_preset", "forest"),
+        "background_style": getattr(user, "background_style", "paper"),
+        "display_density": getattr(user, "display_density", "comfortable"),
+        "appearance_presets": PRESETS,
+        "background_options": BACKGROUND_OPTIONS,
+        "density_options": DENSITY_OPTIONS,
+    }
+
+
 def render(request: Request, name: str, context: dict, status_code: int = 200):
     response = templates.TemplateResponse(
         request=request,
@@ -53,6 +67,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
             **context,
             **_shell_context(request, context),
             **_theme_context(request, context),
+            **_appearance_context(context),
         },
         status_code=status_code,
     )

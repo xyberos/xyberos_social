@@ -1,23 +1,35 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}Dashboard | Social+{% endblock %}
 {% block content %}
 <section class="dashboard-layout">
    {{ page_heading('Your dashboard', 'Dashboard') }} 
   <section class="dashboard-compose" aria-labelledby="dashboard-compose-title">
     <h2 id="dashboard-compose-title" class="visually-hidden">Publish an update</h2>
-    <div class="compose-entry">
-      <div class="post-avatar" aria-hidden="true">{{ user.display_name[:1]|upper }}</div>
-      <a class="compose-open" href="/posts/new"><span class="material-symbols-rounded" aria-hidden="true">edit_square</span>New post</a>
+    <div class="compose-entry feed-composer">
+      {{ avatar(user, 'post-avatar') }}
+      <div class="feed-composer-main">
+        <a class="compose-open" href="/posts/new"><span class="material-symbols-rounded" aria-hidden="true">edit_square</span>What's on your mind, {{ user.display_name.split(' ')[0] }}?</a>
+        <div class="feed-composer-actions">
+          <a class="composer-tool" href="/posts/new">
+            <span class="composer-tool-icon" aria-hidden="true"><span class="material-symbols-rounded">add_photo_alternate</span></span>
+            Photo/video
+          </a>
+          <a class="button button-primary composer-post" href="/posts/new">New post</a>
+        </div>
+      </div>
     </div>
   </section>
 
-  <div class="dashboard-preferences">
-    <p>
-      {% if source == "people" %}Followed people{% elif source == "communities" %}Joined communities{% else %}Followed people and joined communities{% endif %}
-    </p>
-  </div>
+  <header class="feed-heading">
+    <div>
+      <p class="eyebrow">Your feed</p>
+      <h2>Recent updates</h2>
+    </div>
+    <p class="feed-scope">{% if source == "people" %}Followed people{% elif source == "communities" %}Joined communities{% else %}Followed people and joined communities{% endif %}</p>
+  </header>
 
   {% if posts %}
     <div class="post-list">
@@ -26,7 +38,7 @@
         {% set post_media = media.get(post.id, []) if media else [] %}
         <article class="post-preview">
           <div class="post-head">
-            <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
+            {{ avatar(author, 'post-avatar') }}
             <div class="post-byline">
               <span class="post-author">{{ author.display_name }}</span>
               <p class="post-meta">
@@ -48,6 +60,7 @@
           {% endif %}
           <div class="post-actions">
             <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comment</a>
+            <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>Open</a>
           </div>
         </article>
       {% endfor %}

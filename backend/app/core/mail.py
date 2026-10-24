@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def send_password_reset_email(recipient: str, reset_url: str) -> None:
     send_account_email(
         recipient,
-        "Reset your Soccom password",
+        "Reset your Social+ password",
         "Use this link to reset your password. It expires in 30 minutes:",
         reset_url,
     )

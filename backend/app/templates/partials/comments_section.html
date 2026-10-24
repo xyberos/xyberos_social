@@ -3,6 +3,7 @@
    discussion, a removed post, or a community the reader has not joined. An empty
    `report_url_prefix` hides comment reporting entirely, as a personal update has no moderator. #}
 {% from "partials/comment_tree.html" import show_comment %}
+{% from "partials/avatar.html" import avatar %}
 
 {% macro show_comments(post, user, comments, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported, notice) %}
   <section id="comments" class="thread-comments" aria-labelledby="comments-title">
@@ -10,9 +11,12 @@
     {% if can_comment %}
       <form method="post" action="{{ comments_base }}" class="comment-compose">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="visually-hidden" for="comment-body">Write a comment</label>
-        <textarea id="comment-body" name="body" rows="3" maxlength="5000" placeholder="Add to the conversation" required></textarea>
-        <div class="compose-footer"><small>Up to 5,000 characters</small><button class="button button-primary" type="submit">Comment</button></div>
+        {{ avatar(user, 'comment-avatar') }}
+        <div class="comment-compose-main">
+          <label class="visually-hidden" for="comment-body">Write a comment</label>
+          <textarea id="comment-body" name="body" class="comment-compose-input" rows="2" maxlength="5000" placeholder="Write a comment…" required></textarea>
+          <div class="comment-compose-actions"><small>Up to 5,000 characters</small><button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">send</span>Comment</button></div>
+        </div>
       </form>
     {% elif notice %}<p class="{{ notice[0] }}">{{ notice[1] }}</p>{% endif %}
     <div class="comment-list">

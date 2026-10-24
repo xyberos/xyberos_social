@@ -620,11 +620,11 @@ def test_call_metrics_are_exported(client_factory):
     assert alice.post(f"/calls/{call['id']}/end").status_code == 200
 
     body = alice.get("/metrics").text
-    assert 'soccom_calls_started_total{kind="direct",media="audio"} 1' in body
-    assert 'soccom_calls_ended_total{reason="hangup"} 1' in body
-    assert "soccom_call_ring_duration_seconds_count 1" in body
-    assert "# TYPE soccom_calls_active gauge" in body
-    assert "# TYPE soccom_call_participants_joined gauge" in body
+    assert 'social_plus_calls_started_total{kind="direct",media="audio"} 1' in body
+    assert 'social_plus_calls_ended_total{reason="hangup"} 1' in body
+    assert "social_plus_call_ring_duration_seconds_count 1" in body
+    assert "# TYPE social_plus_calls_active gauge" in body
+    assert "# TYPE social_plus_call_participants_joined gauge" in body
 
 
 def test_call_settings_round_trip(client_factory, database_factory):

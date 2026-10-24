@@ -2,11 +2,12 @@
    thread. The callers differ only in the URLs they build and in who may moderate:
    `comments_base` is the collection endpoint (replies post to it, removal appends
    `/{id}/remove`), and an empty `report_url_prefix` hides reporting entirely. #}
+{% from "partials/avatar.html" import avatar %}
 {% macro show_comment(node, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported) %}
   {% set comment = node.comment %}
   <article class="comment" id="comment-{{ comment.id }}">
     <div class="comment-meta">
-      <div class="comment-avatar" aria-hidden="true">{{ node.author.display_name[:1]|upper }}</div>
+      {{ avatar(node.author, 'comment-avatar') }}
       <div class="comment-meta-copy"><strong>{{ node.author.display_name }}</strong><span>@{{ node.author.username }}</span><time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%b %d, %Y · %H:%M') }}</time></div>
     </div>
     {% if comment.removed_at %}<p class="removed-copy">This comment was removed.</p>{% else %}<p class="comment-body">{{ comment.body }}</p>{% endif %}

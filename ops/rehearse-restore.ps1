@@ -19,15 +19,15 @@
 .EXAMPLE
     # Rehearse against a database captured by a different container or role.
     powershell -ExecutionPolicy Bypass -File ops/rehearse-restore.ps1 `
-        -Container soccom-postgres-1 -User soccom -SourceDatabase soccom -TargetDatabase soccom_restore_rehearsal
+        -Container social-postgres-1 -User social+ -SourceDatabase social+ -TargetDatabase social+_restore_rehearsal
 #>
 [CmdletBinding()]
 param(
-    [string]$Container = "soccom-postgres-1",
-    [string]$User = "soccom",
-    [string]$SourceDatabase = "soccom",
-    [string]$TargetDatabase = "soccom_test",
-    [string]$DumpPath = "/tmp/soccom-restore-rehearsal.dump"
+    [string]$Container = "social-postgres-1",
+    [string]$User = "social+",
+    [string]$SourceDatabase = "social+",
+    [string]$TargetDatabase = "social+_test",
+    [string]$DumpPath = "/tmp/social-plus-restore-rehearsal.dump"
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,5 +121,5 @@ Write-Host "PASS: $tablesCompared tables restored with identical row counts, rev
 Write-Host "      Restored database '$TargetDatabase' was left in place for inspection."
 Write-Host "      Drop it with: $dropHint"
 Write-Host "      Record the rehearsal so the staleness alert can see it:"
-Write-Host "        soccom_restore_rehearsal_timestamp_seconds $epoch"
+Write-Host "        social_plus_restore_rehearsal_timestamp_seconds $epoch"
 exit 0

@@ -5,19 +5,19 @@
 # the two queues. Scrape interval is assumed to be 15s.
 #
 # Two of these need a decision before they are useful in an environment:
-#   * SoccomOutboxBacklogIsNotDraining is expected to fire until a publisher ships, because
+#   * SocialPlusOutboxBacklogIsNotDraining is expected to fire until a publisher ships, because
 #     nothing consumes the outbox yet. Keep it muted until then.
-#   * SoccomRestoreRehearsalIsStale reads a metric that only exists once the scheduled
+#   * SocialPlusRestoreRehearsalIsStale reads a metric that only exists once the scheduled
 #     restore rehearsal pushes its timestamp. Run it on a schedule and push the result, or
 #     delete the rule.
 #
 # Each annotation points at the matching section of ops/runbooks.md.
 
 groups:
-  - name: soccom-availability
+  - name: social-plus-availability
     rules:
-      - alert: SoccomServiceDown
-        expr: up{job="soccom"} == 0
+      - alert: SocialPlusServiceDown
+        expr: up{job="social-plus"} == 0
         for: 2m
         labels:
           severity: critical
@@ -26,8 +26,8 @@ groups:
           description: "No successful scrape for 2 minutes. Confirm the process is running before assuming network trouble."
           runbook: "ops/runbooks.md#service-down"
 
-      - alert: SoccomReadinessFailing
-        expr: probe_success{job="soccom-readiness"} == 0
+      - alert: SocialPlusReadinessFailing
+        expr: probe_success{job="social-plus-readiness"} == 0
         for: 5m
         labels:
           severity: critical
@@ -36,14 +36,14 @@ groups:
           description: "`GET /readyz` is failing, so the database is unreachable from the application. Drain traffic rather than restarting the process."
           runbook: "ops/runbooks.md#database-unreachable"
 
-  - name: soccom-errors-and-latency
+  - name: social-plus-errors-and-latency
     rules:
-      - alert: SoccomServerErrorRateHigh
+      - alert: SocialPlusServerErrorRateHigh
         expr: |
           (
-            sum(rate(soccom_http_requests_total{status="5xx"}[5m]))
+            sum(rate(social_plus_http_requests_total{status="5xx"}[5m]))
             /
-            clamp_min(sum(rate(soccom_http_requests_total[5m])), 0.001)
+            clamp_min(sum(rate(social_plus_http_requests_total[5m])), 0.001)
           ) > 0.05
         for: 10m
         labels:
@@ -53,11 +53,11 @@ groups:
           description: "Search the log stream for `\"event\": \"request.failed\"` and correlate the request ids with the failing responses."
           runbook: "ops/runbooks.md#elevated-errors-or-latency"
 
-      - alert: SoccomRequestLatencyHigh
+      - alert: SocialPlusRequestLatencyHigh
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le, route) (rate(soccom_http_request_duration_seconds_bucket[5m]))
+            sum by (le, route) (rate(social_plus_http_request_duration_seconds_bucket[5m]))
           ) > 1
         for: 10m
         labels:
@@ -67,15 +67,15 @@ groups:
           description: "One slow route. Compare with the database pool gauges before assuming an application problem."
           runbook: "ops/runbooks.md#elevated-errors-or-latency"
 
-  - name: soccom-saturation
+  - name: social-plus-saturation
     rules:
-      - alert: SoccomDatabasePoolSaturated
+      - alert: SocialPlusDatabasePoolSaturated
         expr: |
           (
-            soccom_db_pool_connections{state="checked_out"}
+            social_plus_db_pool_connections{state="checked_out"}
             /
             clamp_min(
-              soccom_db_pool_connections{state="size"} + soccom_db_pool_connections{state="overflow"},
+              social_plus_db_pool_connections{state="size"} + social_plus_db_pool_connections{state="overflow"},
               1
             )
           ) > 0.9
@@ -87,8 +87,8 @@ groups:
           description: "Requests are about to queue for a connection. Look for a slow query or a leaked session before raising the pool size."
           runbook: "ops/runbooks.md#pool-exhaustion"
 
-      - alert: SoccomIdempotencyKeysStuck
-        expr: soccom_idempotency_keys_in_progress > 10
+      - alert: SocialPlusIdempotencyKeysStuck
+        expr: social_plus_idempotency_keys_in_progress > 10
         for: 15m
         labels:
           severity: warning
@@ -97,8 +97,8 @@ groups:
           description: "Retries presenting those keys answer 409 until the reservations are resolved."
           runbook: "ops/runbooks.md#stuck-idempotency-keys"
 
-      - alert: SoccomOutboxBacklogIsNotDraining
-        expr: soccom_outbox_unpublished_events > 1000
+      - alert: SocialPlusOutboxBacklogIsNotDraining
+        expr: social_plus_outbox_unpublished_events > 1000
         for: 24h
         labels:
           severity: info
@@ -107,10 +107,10 @@ groups:
           description: "Expected until a publisher ships; keep muted until then. After that, this means the publisher is stalled or failing."
           runbook: "ops/runbooks.md#outbox-backlog"
 
-  - name: soccom-release-integrity
+  - name: social-plus-release-integrity
     rules:
-      - alert: SoccomRestoreRehearsalIsStale
-        expr: (time() - soccom_restore_rehearsal_timestamp_seconds) > 35 * 24 * 3600
+      - alert: SocialPlusRestoreRehearsalIsStale
+        expr: (time() - social_plus_restore_rehearsal_timestamp_seconds) > 35 * 24 * 3600
         for: 1h
         labels:
           severity: warning

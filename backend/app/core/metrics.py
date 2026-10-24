@@ -162,7 +162,7 @@ registry = Registry()
 
 http_requests = registry.register(
     Counter(
-        "soccom_http_requests_total",
+        "social_plus_http_requests_total",
         "HTTP requests by route template, method, and status class.",
         ("route", "method", "status"),
     )
@@ -170,7 +170,7 @@ http_requests = registry.register(
 
 http_request_duration = registry.register(
     Histogram(
-        "soccom_http_request_duration_seconds",
+        "social_plus_http_request_duration_seconds",
         "HTTP request duration by route template and method.",
         ("route", "method"),
     )
@@ -180,7 +180,7 @@ http_request_duration = registry.register(
 # reasons, and three signaling types.
 calls_started = registry.register(
     Counter(
-        "soccom_calls_started_total",
+        "social_plus_calls_started_total",
         "Calls started, by media and conversation kind.",
         ("media", "kind"),
     )
@@ -188,7 +188,7 @@ calls_started = registry.register(
 
 calls_ended = registry.register(
     Counter(
-        "soccom_calls_ended_total",
+        "social_plus_calls_ended_total",
         "Calls ended, by the recorded end reason.",
         ("reason",),
     )
@@ -196,7 +196,7 @@ calls_ended = registry.register(
 
 call_ring_duration = registry.register(
     Histogram(
-        "soccom_call_ring_duration_seconds",
+        "social_plus_call_ring_duration_seconds",
         "Seconds between a call ringing and its first participant joining.",
         (),
     )
@@ -204,7 +204,7 @@ call_ring_duration = registry.register(
 
 call_signals = registry.register(
     Counter(
-        "soccom_call_signals_total",
+        "social_plus_call_signals_total",
         "Signaling packets relayed, by signal type.",
         ("signal",),
     )
@@ -212,7 +212,7 @@ call_signals = registry.register(
 
 call_rejections = registry.register(
     Counter(
-        "soccom_call_rejections_total",
+        "social_plus_call_rejections_total",
         "Call actions refused, by reason.",
         ("reason",),
     )

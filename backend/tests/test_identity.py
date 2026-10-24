@@ -1,9 +1,12 @@
 import re
+from io import BytesIO
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from PIL import Image
 
 import app.api.routes.identity as identity_routes
+import app.api.routes.account as account_routes
 
 from conftest import csrf_from
 
@@ -43,6 +46,125 @@ def test_register_creates_account_and_starts_session(client):
     assert "@ada" in profile.text
     assert 'href="/settings"' in profile.text
     assert "Save notification settings" not in profile.text
+
+
+class AvatarStorage:
+    def __init__(self):
+        self.objects = {}
+
+    def put_bytes(self, key, payload, *, content_type):
+        self.objects[key] = (payload, content_type)
+
+    def get_bytes(self, key):
+        return self.objects[key][0]
+
+    def delete(self, key):
+        self.objects.pop(key, None)
+
+
+def avatar_storage(monkeypatch):
+    storage = AvatarStorage()
+    monkeypatch.setattr(account_routes, "get_storage", lambda: storage)
+    return storage
+
+
+def png_bytes(color="purple", size=(4, 4)):
+    image = BytesIO()
+    Image.new("RGB", size, color).save(image, format="PNG")
+    return image.getvalue()
+
+
+def upload_avatar(client, payload, filename="avatar.png", content_type="image/png"):
+    page = client.get("/profile")
+    return client.post(
+        "/profile/avatar",
+        data={"csrf_token": csrf_from(page.text)},
+        files={"avatar": (filename, payload, content_type)},
+        follow_redirects=False,
+    )
+
+
+def avatar_url_from(client):
+    return re.search(r'<img src="(/avatars/[^"]+)"', client.get("/profile").text).group(1)
+
+
+def test_avatar_upload_is_sanitized_served_replaced_and_can_fall_back_to_an_initial(
+    client, monkeypatch
+):
+    storage = avatar_storage(monkeypatch)
+    register(client)
+    uploaded = upload_avatar(client, png_bytes())
+    assert uploaded.headers["location"] == "/profile?avatar_saved=1"
+    assert '<img src="/avatars/' in client.get("/profile").text
+    avatar_url = avatar_url_from(client)
+    assert "?v=" in avatar_url
+    response = client.get(avatar_url)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "public, max-age=300"
+
+    replaced = upload_avatar(client, png_bytes("orange"))
+    assert replaced.headers["location"] == "/profile?avatar_saved=1"
+    replaced_url = avatar_url_from(client)
+    assert replaced_url != avatar_url
+    # Only the current object is retained: the superseded one is reclaimed after the commit.
+    assert len(storage.objects) == 1
+
+    removed = client.post(
+        "/profile/avatar/remove",
+        data={"csrf_token": csrf_from(client.get("/profile").text)},
+        follow_redirects=False,
+    )
+    assert removed.headers["location"] == "/profile?avatar_removed=1"
+    assert '<img src="/avatars/' not in client.get("/profile").text
+    assert storage.objects == {}
+
+
+def test_avatar_upload_rejects_bytes_that_are_not_an_image(client, monkeypatch):
+    storage = avatar_storage(monkeypatch)
+    register(client)
+    rejected = upload_avatar(
+        client, b"not an image", filename="avatar.png", content_type="image/png"
+    )
+    assert rejected.headers["location"] == "/profile?avatar_error=image"
+    assert storage.objects == {}
+
+
+def test_avatar_upload_applies_exif_orientation(client, monkeypatch):
+    avatar_storage(monkeypatch)
+    register(client)
+    image = Image.new("RGB", (6, 2), "purple")
+    exif = Image.Exif()
+    exif[0x0112] = 6  # The phone recorded the frame rotated 90° clockwise.
+    payload = BytesIO()
+    image.save(payload, format="JPEG", exif=exif)
+    uploaded = upload_avatar(
+        client, payload.getvalue(), filename="portrait.jpg", content_type="image/jpeg"
+    )
+    assert uploaded.headers["location"] == "/profile?avatar_saved=1"
+    served = client.get(avatar_url_from(client))
+    with Image.open(BytesIO(served.content)) as stored:
+        assert stored.size == (2, 6)
+
+
+def test_account_deletion_removes_the_avatar_object(client, monkeypatch):
+    storage = avatar_storage(monkeypatch)
+    register(client)
+    upload_avatar(client, png_bytes())
+    assert len(storage.objects) == 1
+
+    page = client.get("/profile")
+    deleted = client.post(
+        "/account/delete",
+        data={
+            "csrf_token": csrf_from(page.text),
+            "password": "correct-horse-battery-staple",
+            "confirmation": "DELETE",
+        },
+        follow_redirects=False,
+    )
+    assert deleted.headers["location"] == "/account-deleted"
+    assert storage.objects == {}
 
 
 def test_profile_update_requires_auth_and_saves_with_htmx(client):

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}Notifications | Social+{% endblock %}
 {% block content %}
 <section class="notifications-layout">
@@ -25,10 +26,14 @@
         <article class="notification-row {% if not notification.read_at %}notification-unread{% endif %}">
           {% set category_icon = {"reply": "forum", "moderation": "shield", "call": "phone_missed"}.get(notification.category, "notifications") %}
           {% set category_label = {"reply": "Reply", "moderation": "Moderation", "call": "Call"}.get(notification.category, "Update") %}
-          <div class="notification-icon" aria-hidden="true"><span class="material-symbols-rounded">{{ category_icon }}</span></div>
+          {% if actor %}
+            {{ avatar(actor, 'notification-avatar') }}
+          {% else %}
+            <div class="notification-icon" aria-hidden="true"><span class="material-symbols-rounded">{{ category_icon }}</span></div>
+          {% endif %}
           <div class="notification-copy">
             <div class="notification-meta">
-              <span>{{ category_label }}</span>
+              <span class="notification-category"><span class="material-symbols-rounded" aria-hidden="true">{{ category_icon }}</span>{{ category_label }}</span>
               <time datetime="{{ notification.created_at.isoformat() }}">{{ notification.created_at.strftime("%Y-%m-%d %H:%M") }}</time>
             </div>
             <p>{{ notification.message }}</p>

@@ -10,8 +10,8 @@ from app.core.config import get_settings
 from app.models import User, UserSession
 from app.core.security import check_rate_limit, new_token, session_expiry, token_digest
 
-SESSION_COOKIE = "soccom_session"
-THEME_COOKIE = "soccom_theme"
+SESSION_COOKIE = "social_plus_session"
+THEME_COOKIE = "social_plus_theme"
 THEME_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 
@@ -37,11 +37,11 @@ def set_session_cookie(response: Response, raw_token: str) -> None:
 
 
 def session_cookie_name() -> str:
-    return "__Host-soccom_session" if get_settings().cookie_secure else SESSION_COOKIE
+    return "__Host-social_plus_session" if get_settings().cookie_secure else SESSION_COOKIE
 
 
 def theme_cookie_name() -> str:
-    return "__Host-soccom_theme" if get_settings().cookie_secure else THEME_COOKIE
+    return "__Host-social_plus_theme" if get_settings().cookie_secure else THEME_COOKIE
 
 
 def set_theme_cookie(response: Response, theme: str) -> None:

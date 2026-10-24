@@ -9,7 +9,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
 
-MIGRATION_URL_ENV = "SOCCOM_MIGRATION_TEST_DATABASE_URL"
+MIGRATION_URL_ENV = "SOCIAL_PLUS_MIGRATION_TEST_DATABASE_URL"
 ALEMBIC_URL_ENV = "ALEMBIC_DATABASE_URL"
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 

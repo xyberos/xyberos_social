@@ -4,10 +4,11 @@
    the handle as text because the thread already names the community it belongs to. `media`
    is the verified attachment list for the post, which a personal update may carry. #}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/avatar.html" import avatar %}
 {% macro show_post_card(post, author, community, author_url, media=none) %}
   <article class="thread-post">
     <div class="post-head">
-      <div class="post-avatar" aria-hidden="true">{{ author.display_name[:1]|upper }}</div>
+      {{ avatar(author, 'post-avatar') }}
       <div class="post-byline">
         <span class="post-author">{{ author.display_name }}</span>
         <p class="post-meta">

@@ -1,0 +1,9 @@
+{% macro avatar(user, class_name) -%}
+  <div class="{{ class_name }}" aria-hidden="true">
+    {% if user.avatar_url %}
+      <img src="{{ user.avatar_url }}" alt="">
+    {% else %}
+      {{ user.display_name[:1]|upper }}
+    {% endif %}
+  </div>
+{%- endmacro %}

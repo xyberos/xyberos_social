@@ -1,16 +1,61 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}Your profile | X-Social{% endblock %}
 {% block content %}
 <section class="profile-layout">
-  {{ page_heading('Account / Profile', 'Your corner of X-Social.', 'Keep the details that help your people recognize you.') }}
+  {{ page_heading('Account / Profile', 'Your corner of Social+.', 'Keep the details that help your people recognize you.') }}
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
   {% if request.query_params.get('saved') %}<p class="success" role="status">Profile saved.</p>{% endif %}
+  {% if request.query_params.get('avatar_saved') %}<p class="success" role="status">Avatar updated.</p>{% endif %}
+  {% if request.query_params.get('avatar_removed') %}<p class="success" role="status">Avatar removed. Your initial is shown instead.</p>{% endif %}
+  {% if request.query_params.get('avatar_error') %}<p class="alert" role="alert">Choose an image up to 5 MB. If storage is unavailable, try again shortly.</p>{% endif %}
+
+  <section class="avatar-editor" data-avatar-editor aria-labelledby="avatar-title">
+    <div class="avatar-editor-copy">
+      <strong id="avatar-title">Profile photo</strong>
+      <span>Your photo appears beside everything you post. JPG, PNG, GIF, or WebP up to 5 MB.</span>
+    </div>
+    <form method="post" action="/profile/avatar" enctype="multipart/form-data"
+          class="avatar-upload-form" data-avatar-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="avatar-picker">
+        <div class="avatar-preview">
+          {{ avatar(user, 'avatar avatar-editor-image') }}
+          <label class="avatar-camera" for="avatar-file" title="Choose a new profile photo">
+            <span class="material-symbols-rounded" aria-hidden="true">photo_camera</span>
+            <span class="visually-hidden">Choose a new profile photo</span>
+          </label>
+        </div>
+        <div class="avatar-picker-copy">
+          <strong>Choose a photo</strong>
+          <span>Drag an image here, or pick one from your device.</span>
+          <span class="avatar-filename" data-avatar-filename aria-live="polite">No photo selected</span>
+        </div>
+        <div class="avatar-picker-actions">
+          <input id="avatar-file" class="visually-hidden" type="file" name="avatar"
+                 accept="image/jpeg,image/png,image/gif,image/webp" required data-avatar-input
+                 aria-label="Choose a profile photo">
+          <label class="button button-quiet avatar-choose" for="avatar-file">Choose photo</label>
+          <button class="button button-primary" type="submit" data-avatar-submit>Save photo</button>
+          <button class="text-button avatar-cancel" type="button" data-avatar-cancel hidden>Cancel</button>
+        </div>
+      </div>
+    </form>
+    {% if user.avatar_key %}
+      <form method="post" action="/profile/avatar/remove" class="avatar-remove-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="text-button danger-button" type="submit">
+          <span class="material-symbols-rounded" aria-hidden="true">delete</span>Remove current photo
+        </button>
+      </form>
+    {% endif %}
+  </section>
 
   <form method="post" action="/profile" class="profile-form" hx-post="/profile" hx-target="#profile-result" hx-swap="innerHTML">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="profile-id">
-      <div class="avatar" aria-hidden="true">{{ user.display_name[:1]|upper }}</div>
+      {{ avatar(user, 'avatar') }}
       <div><strong>{{ user.display_name }}</strong><span>@{{ user.username }}</span></div>
     </div>
     <label>Email address<input type="email" value="{{ user.email }}" disabled><small>Email changes are not available yet.</small></label>
@@ -30,4 +75,6 @@
     <button class="text-button" type="submit"><span class="material-symbols-rounded" aria-hidden="true">logout</span>Log out</button>
   </form>
 </section>
+{# Loaded with the page because hx-boost swaps #main-content without re-running the head. #}
+<script defer src="/static/js/avatar-upload.js"></script>
 {% endblock %}

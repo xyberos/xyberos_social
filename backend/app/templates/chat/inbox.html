@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}Inbox | X-Social{% endblock %}
 {% block content %}
 <section class="inbox-layout">
@@ -8,8 +9,12 @@
   {% endcall %}
   <div class="inbox-list">
     {% for item in conversations %}
-      <a class="inbox-row" href="/conversations/{{ item.conversation.id }}">
-        <div class="inbox-avatar" aria-hidden="true">{{ (item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title)[:1]|upper }}</div>
+      <a class="inbox-row{% if item.unread_count %} inbox-row-unread{% endif %}" href="/conversations/{{ item.conversation.id }}">
+        {% if item.conversation.kind == 'direct' and item.peer %}
+          {{ avatar(item.peer, 'inbox-avatar') }}
+        {% else %}
+          <div class="inbox-avatar" aria-hidden="true">{{ item.conversation.title[:1]|upper }}</div>
+        {% endif %}
         <div class="inbox-copy">
           <div class="inbox-title-row">
             <strong class="inbox-title{% if item.unread_count %} inbox-title-unread{% endif %}">{{ item.peer.display_name if item.conversation.kind == 'direct' and item.peer else item.conversation.title }}{% if item.unread_count %}<span class="visually-hidden">, {{ item.unread_count }} unread message{{ '' if item.unread_count == 1 else 's' }}</span>{% endif %}</strong>
@@ -19,6 +24,7 @@
           {% elif item.conversation.kind == 'group' %}<span class="inbox-preview">{{ item.participants|length }} participants · No messages yet</span>
           {% else %}<span class="inbox-preview">Start a conversation</span>{% endif %}
         </div>
+        {% if item.unread_count %}<span class="inbox-unread-dot" aria-hidden="true"></span>{% endif %}
         {% if item.blocked %}<span class="muted-status">Blocked</span>{% endif %}
       </a>
     {% else %}

@@ -139,10 +139,10 @@ def test_hsts_only_when_running_in_production(client, monkeypatch):
         cookie_secure=True,
         smtp_host="smtp.example",
         smtp_starttls=True,
-        app_base_url="https://soccom.example",
+        app_base_url="https://social-plus.example",
         s3_endpoint_url="https://objects.example",
         clamav_host="clamav.example",
-        database_url="postgresql+psycopg://soccom:secret@localhost:5432/soccom",
+        database_url="postgresql+psycopg://social+:secret@localhost:5432/social+",
     )
     monkeypatch.setattr("app.api.middleware.get_settings", lambda: production)
 

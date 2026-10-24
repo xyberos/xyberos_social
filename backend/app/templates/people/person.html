@@ -1,38 +1,49 @@
 {% extends "base.html" %}
-{% from "partials/page_heading.html" import page_heading %}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/avatar.html" import avatar %}
 {% block title %}{{ person.display_name }} | Social+{% endblock %}
 {% block content %}
 <section class="directory-layout">
   <a class="back-link" href="/people">← People</a>
-  {{ page_heading('Person', person.display_name, '@' ~ person.username ~ ' · Member since ' ~ person.created_at.strftime('%B %Y') ~ (' · ' ~ person.bio if person.bio else '')) }}
   {% if message %}<p class="alert" role="status">{{ message }}</p>{% endif %}
-  <div class="person-actions">
-    {% if blocked %}
-      <form method="post" action="/people/{{ person.id }}/unblock">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/people/{{ person.id }}">
-        <button class="button button-quiet" type="submit">Unblock</button>
-      </form>
-    {% elif blocked_you %}
-      <span class="muted-status">They blocked you</span>
-    {% else %}
-      <form method="post" action="/people/{{ person.id }}/{{ 'unfollow' if following else 'follow' }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/people/{{ person.id }}">
-        <button class="button {{ 'button-quiet' if following else 'button-primary' }}" type="submit">{{ 'Following' if following else 'Follow' }}</button>
-      </form>
-      <form method="post" action="/people/{{ person.id }}/block">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/people/{{ person.id }}">
-        <button class="text-button danger-button" type="submit">Block</button>
-      </form>
-      <form method="post" action="/conversations/direct/{{ person.id }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button button-quiet" type="submit">Message</button>
-      </form>
-    {% endif %}
-  </div>
+  <header class="profile-hero">
+    <div class="profile-hero-cover" aria-hidden="true"></div>
+    <div class="profile-hero-body">
+      {{ avatar(person, 'avatar profile-hero-avatar') }}
+      <div class="profile-hero-copy">
+        <p class="eyebrow">Person</p>
+        <h1>{{ person.display_name }}</h1>
+        <p>@{{ person.username }} · Member since {{ person.created_at.strftime('%B %Y') }}</p>
+        {% if person.bio %}<p class="profile-bio">{{ person.bio }}</p>{% endif %}
+      </div>
+      <div class="person-actions profile-hero-actions">
+        {% if blocked %}
+          <form method="post" action="/people/{{ person.id }}/unblock">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/people/{{ person.id }}">
+            <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">lock_open</span>Unblock</button>
+          </form>
+        {% elif blocked_you %}
+          <span class="muted-status">They blocked you</span>
+        {% else %}
+          <form method="post" action="/people/{{ person.id }}/{{ 'unfollow' if following else 'follow' }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/people/{{ person.id }}">
+            <button class="button {{ 'button-quiet' if following else 'button-primary' }}" type="submit"><span class="material-symbols-rounded" aria-hidden="true">{{ 'check' if following else 'person_add' }}</span>{{ 'Following' if following else 'Follow' }}</button>
+          </form>
+          <form method="post" action="/conversations/direct/{{ person.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span>Message</button>
+          </form>
+          <form method="post" action="/people/{{ person.id }}/block">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/people/{{ person.id }}">
+            <button class="text-button danger-button" type="submit">Block</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </header>
 
   <section class="posts-section" aria-labelledby="person-updates-title">
     <div class="section-heading"><div><p class="eyebrow">Their own page</p><h2 id="person-updates-title">Posts</h2></div></div>
@@ -42,7 +53,7 @@
           <article class="post-row">
             {% set post_media = media.get(post.id, []) if media else [] %}
             <div class="post-head">
-              <div class="post-avatar" aria-hidden="true">{{ person.display_name[:1]|upper }}</div>
+              {{ avatar(person, 'post-avatar') }}
               <div class="post-byline">
                 <span class="post-author">{{ person.display_name }}</span>
                 <p class="post-meta"><time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>{% if post.community_id %}<span>Community · {{ communities[post.id].name }}</span>{% else %}<span>Personal update</span>{% endif %}</p>

@@ -79,12 +79,12 @@ def metrics(database: Session = Depends(get_db)):
     """
     blocks = [
         gauge(
-            "soccom_uptime_seconds",
+            "social_plus_uptime_seconds",
             "Seconds since the process started.",
             [({}, uptime_seconds())],
         ),
         gauge(
-            "soccom_db_pool_connections",
+            "social_plus_db_pool_connections",
             "Database pool connections by state.",
             _pool_samples(),
         ),
@@ -92,7 +92,7 @@ def metrics(database: Session = Depends(get_db)):
     try:
         blocks.append(
             gauge(
-                "soccom_outbox_unpublished_events",
+                "social_plus_outbox_unpublished_events",
                 "Outbox events written but not yet published.",
                 [
                     (
@@ -109,7 +109,7 @@ def metrics(database: Session = Depends(get_db)):
         )
         blocks.append(
             gauge(
-                "soccom_idempotency_keys_in_progress",
+                "social_plus_idempotency_keys_in_progress",
                 "Idempotency keys reserved by a request that has not finished.",
                 [
                     (
@@ -126,7 +126,7 @@ def metrics(database: Session = Depends(get_db)):
         )
         blocks.append(
             gauge(
-                "soccom_attachments_unverified",
+                "social_plus_attachments_unverified",
                 "Attachments issued or uploaded but not yet verified by a scan.",
                 [({}, float(pending_upload_count(database)))],
             )
@@ -134,14 +134,14 @@ def metrics(database: Session = Depends(get_db)):
         open_calls, joined_participants = active_call_totals(database)
         blocks.append(
             gauge(
-                "soccom_calls_active",
+                "social_plus_calls_active",
                 "Calls ringing or in progress.",
                 [({}, float(open_calls))],
             )
         )
         blocks.append(
             gauge(
-                "soccom_call_participants_joined",
+                "social_plus_call_participants_joined",
                 "Participants currently joined to an open call.",
                 [({}, float(joined_participants))],
             )

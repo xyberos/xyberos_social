@@ -12,13 +12,17 @@
         <div class="community-mark" aria-hidden="true">{{ community.name[:1]|upper }}</div>
         <div class="community-info">
           <a class="community-name" href="/communities/{{ community.slug }}">{{ community.name }}</a>
-          <span>/c/{{ community.slug }} · {{ community.visibility }}{% if roles.get(community.id) %} · {{ roles.get(community.id) }}{% endif %}</span>
+          <span class="community-meta">
+            <span class="community-address">/c/{{ community.slug }}</span>
+            <span class="kind-badge">{{ community.visibility }}</span>
+            {% if roles.get(community.id) %}<span class="kind-badge">{{ roles.get(community.id) }}</span>{% endif %}
+          </span>
           <p>{{ community.description or 'A place for people to talk about what they care about.' }}</p>
         </div>
         {% if user and not roles.get(community.id) and community.visibility == 'public' %}
           <form method="post" action="/communities/{{ community.slug }}/join">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-quiet" type="submit"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>Join</button>
+            <button class="button button-primary" type="submit"><span class="material-symbols-rounded" aria-hidden="true">group_add</span>Join</button>
           </form>
         {% endif %}
       </article>

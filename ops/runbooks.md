@@ -1,6 +1,6 @@
 # Operational runbooks
 
-Beta-phase procedures for the Soccom backend. Each section names the alert or symptom that
+Beta-phase procedures for the Social+ backend. Each section names the alert or symptom that
 starts it, what to do first, how to diagnose, and what to record afterwards.
 
 Before anything else, these three commands answer most questions:
@@ -16,7 +16,7 @@ and in the JSON body, so a user report can be traced to a log line without guess
 
 ## Service down
 
-Alert: `SoccomServiceDown`.
+Alert: `SocialPlusServiceDown`.
 
 1. Confirm the process is running and the port is bound: `Get-NetTCPConnection -LocalPort 8000 -State Listen`.
 2. If it is up but not scrapeable, the scrape target or network policy is wrong, not the app.
@@ -30,7 +30,7 @@ Record: start time, end time, cause, and whether data was lost. A restart alone 
 
 ## Database unreachable
 
-Alert: `SoccomReadinessFailing`. Symptom: `/readyz` returns `503 {"status": "unavailable"}`.
+Alert: `SocialPlusReadinessFailing`. Symptom: `/readyz` returns `503 {"status": "unavailable"}`.
 
 1. Do not restart the application. Liveness is deliberately dependency-free, so a restart
    only loses in-flight work.
@@ -45,11 +45,11 @@ Record: duration, whether any writes were accepted during the outage, and which 
 
 ## Elevated errors or latency
 
-Alert: `SoccomServerErrorRateHigh` or `SoccomRequestLatencyHigh`.
+Alert: `SocialPlusServerErrorRateHigh` or `SocialPlusRequestLatencyHigh`.
 
 1. Use the metrics endpoint to see which status class and which route moved:
-   `soccom_http_requests_total{status="5xx"}` and
-   `soccom_http_request_duration_seconds` are labelled by route template, so no path
+   `social_plus_http_requests_total{status="5xx"}` and
+   `social_plus_http_request_duration_seconds` are labelled by route template, so no path
    parameter can hide the culprit.
 2. Pull the failing request ids from the responses and search the logs for
    `"event": "request.failed"`. An unhandled failure logs a traceback with the same id.
@@ -63,9 +63,9 @@ Record: which route, whether users saw it, and the fix.
 
 ## Pool exhaustion
 
-Alert: `SoccomDatabasePoolSaturated`.
+Alert: `SocialPlusDatabasePoolSaturated`.
 
-1. Read `soccom_db_pool_connections{state=...}`: `checked_out` near `size + overflow` is the
+1. Read `social_plus_db_pool_connections{state=...}`: `checked_out` near `size + overflow` is the
    condition, and `overflow` above zero means the pool already grew past its base size.
 2. Look for one slow route in the latency histogram. The usual cause is a query that scans
    without an index once a table has real data.
@@ -89,14 +89,14 @@ change because the application expects a table that does not exist yet.
 4. Never fix forward by editing a migration that has already run in a shared environment:
    add a new revision instead.
 5. Rehearse any new revision on a scratch database before production:
-   `$env:SOCCOM_MIGRATION_TEST_DATABASE_URL = "postgresql+psycopg://soccom:soccom@localhost:5433/soccom_test"` then
+   `$env:SOCIAL_PLUS_MIGRATION_TEST_DATABASE_URL = "postgresql+psycopg://social+:social+@localhost:5433/social+_test"` then
    `pytest backend/tests/test_migrations.py`.
 
 Record: revision before and after, and whether any deploy was half-applied.
 
 ## Restore from backup
 
-Alert: `SoccomRestoreRehearsalIsStale`. Run the rehearsal monthly and after any backup
+Alert: `SocialPlusRestoreRehearsalIsStale`. Run the rehearsal monthly and after any backup
 configuration change:
 
 ```powershell
@@ -118,9 +118,9 @@ in `implementation_plan.md`.
 
 ## Outbox backlog
 
-Alert: `SoccomOutboxBacklogIsNotDraining`.
+Alert: `SocialPlusOutboxBacklogIsNotDraining`.
 
-1. `soccom_outbox_unpublished_events` only grows until a publisher ships. Until then this
+1. `social_plus_outbox_unpublished_events` only grows until a publisher ships. Until then this
    alert is expected and should stay muted; the gauge exists so the backlog is visible
    rather than silently unbounded.
 2. After a publisher exists, a stalled backlog means the publisher is failing or holding a
@@ -132,7 +132,7 @@ Record: backlog size and the reason it was not draining.
 
 ## Stuck idempotency keys
 
-Alert: `SoccomIdempotencyKeysStuck`.
+Alert: `SocialPlusIdempotencyKeysStuck`.
 
 1. A key in `in_progress` means a request reserved it and never completed, so a retry
    presenting the same key answers `409` until the reservation clears.

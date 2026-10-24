@@ -38,14 +38,14 @@ def test_request_counters_and_latency_are_exported(client):
 
     body = scrape(client)
 
-    assert "# TYPE soccom_http_requests_total counter" in body
-    assert "# TYPE soccom_http_request_duration_seconds histogram" in body
-    assert 'soccom_http_requests_total{method="GET",route="/healthz",status="2xx"} 1' in body
-    assert 'soccom_http_request_duration_seconds_count{method="GET",route="/healthz"} 1' in body
-    assert 'soccom_http_request_duration_seconds_bucket{le="+Inf",method="GET",route="/healthz"} 1' in body
-    assert gauge_value(body, "soccom_uptime_seconds") is not None
+    assert "# TYPE social_plus_http_requests_total counter" in body
+    assert "# TYPE social_plus_http_request_duration_seconds histogram" in body
+    assert 'social_plus_http_requests_total{method="GET",route="/healthz",status="2xx"} 1' in body
+    assert 'social_plus_http_request_duration_seconds_count{method="GET",route="/healthz"} 1' in body
+    assert 'social_plus_http_request_duration_seconds_bucket{le="+Inf",method="GET",route="/healthz"} 1' in body
+    assert gauge_value(body, "social_plus_uptime_seconds") is not None
     # The test engine pools statically and reports nothing; the metric is still declared.
-    assert "# TYPE soccom_db_pool_connections gauge" in body
+    assert "# TYPE social_plus_db_pool_connections gauge" in body
 
 
 def test_pool_gauges_report_queue_pool_states(client, monkeypatch):
@@ -59,7 +59,7 @@ def test_pool_gauges_report_queue_pool_states(client, monkeypatch):
     body = scrape(client)
 
     for state in ("size", "checked_in", "checked_out", "overflow"):
-        assert f'soccom_db_pool_connections{{state="{state}"}}' in body
+        assert f'social_plus_db_pool_connections{{state="{state}"}}' in body
 
 
 def test_path_parameters_are_substituted_out_of_route_labels(client):
@@ -92,7 +92,7 @@ def test_unmatched_requests_share_one_placeholder(client):
 
     body = scrape(client)
 
-    assert 'soccom_http_requests_total{method="GET",route="unmatched",status="4xx"} 1' in body
+    assert 'social_plus_http_requests_total{method="GET",route="unmatched",status="4xx"} 1' in body
     assert "no-such-page-12345" not in body
 
 
@@ -141,8 +141,8 @@ def test_queue_gauges_reflect_stored_state(client):
     body = scrape(client)
 
     # Creating a community enqueues one event, and nothing publishes it yet.
-    assert gauge_value(body, "soccom_outbox_unpublished_events") == 1
-    assert gauge_value(body, "soccom_idempotency_keys_in_progress") == 0
+    assert gauge_value(body, "social_plus_outbox_unpublished_events") == 1
+    assert gauge_value(body, "social_plus_idempotency_keys_in_progress") == 0
 
 
 def test_scrape_survives_a_database_failure(client):
@@ -163,5 +163,5 @@ def test_scrape_survives_a_database_failure(client):
         else:
             app.dependency_overrides.pop(get_db, None)
 
-    assert gauge_value(body, "soccom_uptime_seconds") is not None
-    assert "soccom_outbox_unpublished_events" not in body
+    assert gauge_value(body, "social_plus_uptime_seconds") is not None
+    assert "social_plus_outbox_unpublished_events" not in body

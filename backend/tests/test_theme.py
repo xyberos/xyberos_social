@@ -30,6 +30,11 @@ def theme_choice(page: str) -> str | None:
     return match.group(1) if match else None
 
 
+def appearance_attribute(page: str, name: str) -> str | None:
+    match = re.search(rf'<html[^>]*\bdata-{name}="([^"]+)"', page)
+    return match.group(1) if match else None
+
+
 def test_a_guest_choice_is_remembered_for_the_device(client):
     page = client.get("/login")
     # "System" is the absence of an explicit theme, so the CSS media query decides.
@@ -43,7 +48,7 @@ def test_a_guest_choice_is_remembered_for_the_device(client):
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
-    assert "soccom_theme=dark" in response.headers["set-cookie"]
+    assert "social_plus_theme=dark" in response.headers["set-cookie"]
 
     page = client.get("/login")
     assert theme_attribute(page.text) == "dark"
@@ -65,7 +70,7 @@ def test_the_switch_stays_on_the_site(client):
 def test_an_unknown_theme_is_refused(client):
     response = client.post("/theme", data={"theme": "sepia"}, follow_redirects=False)
     assert response.status_code == 422
-    assert "soccom_theme" not in response.headers.get("set-cookie", "")
+    assert "social_plus_theme" not in response.headers.get("set-cookie", "")
 
 
 def test_every_page_offers_the_three_choices(client_factory):
@@ -90,7 +95,7 @@ def test_the_account_choice_wins_and_is_saved(client_factory, database_factory):
         follow_redirects=False,
     )
     assert switched.status_code == 204
-    assert "soccom_theme=dark" in switched.headers["set-cookie"]
+    assert "social_plus_theme=dark" in switched.headers["set-cookie"]
     with database_factory() as database:
         assert database.scalar(select(User.theme).where(User.username == "alice")) == "dark"
 
@@ -103,7 +108,7 @@ def test_the_account_choice_wins_and_is_saved(client_factory, database_factory):
         follow_redirects=False,
     )
     assert saved.status_code == 303
-    assert "soccom_theme=light" in saved.headers["set-cookie"]
+    assert "social_plus_theme=light" in saved.headers["set-cookie"]
     with database_factory() as database:
         assert database.scalar(select(User.theme).where(User.username == "alice")) == "light"
 
@@ -122,3 +127,34 @@ def test_the_settings_form_refuses_an_unknown_theme(client_factory):
     )
     assert response.status_code == 422
     assert "Choose valid settings." in response.text
+
+
+def test_the_settings_form_saves_and_renders_appearance_preferences(client_factory, database_factory):
+    alice = client_factory()
+    assert create_account(alice, "alice@example.com", "alice").status_code == 303
+    page = alice.get("/settings")
+    saved = alice.post(
+        "/settings",
+        data={
+            "csrf_token": csrf_from(page.text),
+            **SETTINGS_FORM,
+            "theme": "dark",
+            "appearance_preset": "violet",
+            "background_style": "aurora",
+            "display_density": "compact",
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code == 303
+    with database_factory() as database:
+        user = database.scalar(select(User).where(User.username == "alice"))
+        assert (user.appearance_preset, user.background_style, user.display_density) == (
+            "violet",
+            "aurora",
+            "compact",
+        )
+
+    page = alice.get("/dashboard").text
+    assert appearance_attribute(page, "preset") == "violet"
+    assert appearance_attribute(page, "background") == "aurora"
+    assert appearance_attribute(page, "density") == "compact"

@@ -1,8 +1,10 @@
 """Profile, preferences, and the account data lifecycle."""
 
+import logging
 from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import case, or_, select
@@ -19,9 +21,12 @@ from app.api.deps import (
 )
 from app.api.responses import relative_target, render
 from app.core.theme import THEME_CHOICES
+from app.core.appearance import BACKGROUND_VALUES, DENSITY_VALUES, PRESET_VALUES
 from app.core import events
 from app.core.database import get_db
+from app.core.media import UnsupportedMedia, image_type, strip_image_metadata
 from app.core.scoping import account_scope
+from app.core.storage import StorageError, get_storage
 from app.core.scoping import platform_scope
 from app.models import (
     Comment,
@@ -50,6 +55,15 @@ from app.services.outbox import enqueue_event
 from app.services import workspace
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
+
+AVATAR_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _avatar_key(user: User) -> str:
+    """A fresh key per upload, so the public URL changes and the cache cannot serve the old one."""
+    return f"avatars/{user.id}/{uuid4().hex}"
 
 
 @router.get("/profile", response_class=HTMLResponse)
@@ -149,6 +163,96 @@ def update_profile(
     return RedirectResponse("/profile?saved=1", status_code=303)
 
 
+@router.post("/profile/avatar")
+async def update_avatar(
+    request: Request,
+    avatar: UploadFile = File(),
+    csrf_token: str = Form(),
+    database: Session = Depends(get_db),
+):
+    """Replace an avatar with a normalized image; bytes never enter the database."""
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    payload = await avatar.read(AVATAR_MAX_BYTES + 1)
+    if not payload:
+        return RedirectResponse("/profile?avatar_error=empty", status_code=303)
+    if len(payload) > AVATAR_MAX_BYTES:
+        return RedirectResponse("/profile?avatar_error=size", status_code=303)
+    try:
+        detected = image_type(payload)
+        if detected is None:
+            raise UnsupportedMedia("not an image")
+        normalized = strip_image_metadata(payload, detected)
+    except UnsupportedMedia:
+        return RedirectResponse("/profile?avatar_error=image", status_code=303)
+    storage = get_storage()
+    previous_key = user.avatar_key
+    key = _avatar_key(user)
+    try:
+        storage.put_bytes(key, normalized, content_type=detected)
+    except StorageError as error:
+        logger.warning(
+            "could not store an uploaded avatar",
+            extra={
+                "event": "account.avatar_store_failed",
+                "user_id": str(user.id),
+                "error": str(error),
+            },
+        )
+        return RedirectResponse("/profile?avatar_error=storage", status_code=303)
+    user.avatar_key = key
+    user.avatar_mime_type = detected
+    database.commit()
+    if previous_key and previous_key != key:
+        # The new reference is durable; the superseded object is only a reclamation.
+        try:
+            storage.delete(previous_key)
+        except StorageError:
+            logger.warning(
+                "could not remove the replaced avatar object",
+                extra={"event": "account.avatar_replacement_failed", "user_id": str(user.id)},
+            )
+    return RedirectResponse("/profile?avatar_saved=1", status_code=303)
+
+
+@router.post("/profile/avatar/remove")
+def remove_avatar(
+    request: Request,
+    csrf_token: str = Form(),
+    database: Session = Depends(get_db),
+):
+    """Clear the avatar reference so the universal initial fallback is rendered."""
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    if user.avatar_key:
+        try:
+            get_storage().delete(user.avatar_key)
+        except StorageError:
+            # The reference is still revoked even if a storage retry is needed later.
+            pass
+    user.avatar_key = None
+    user.avatar_mime_type = None
+    database.commit()
+    return RedirectResponse("/profile?avatar_removed=1", status_code=303)
+
+
+@router.get("/avatars/{user_id}")
+def avatar_image(user_id: UUID, database: Session = Depends(get_db)):
+    """Return a user's sanitized avatar; profile avatars are intentionally public."""
+    user = database.get(User, user_id)
+    if user is None or not user.is_active or not user.avatar_key or not user.avatar_mime_type:
+        raise HTTPException(status_code=404, detail="Avatar not found.")
+    try:
+        payload = get_storage().get_bytes(user.avatar_key)
+    except StorageError:
+        raise HTTPException(status_code=503, detail="Avatar temporarily unavailable.") from None
+    return Response(
+        content=payload,
+        media_type=user.avatar_mime_type,
+        # A per-upload version makes a replacement a new URL; the short lifetime keeps a
+        # removed avatar from lingering in a reader's cache.
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.post("/theme")
 def set_theme(
     request: Request,
@@ -206,6 +310,9 @@ def update_settings(
     notify_calls: bool = Form(False),
     accept_calls: bool = Form(False),
     theme: str = Form("system"),
+    appearance_preset: str = Form("forest"),
+    background_style: str = Form("paper"),
+    display_density: str = Form("comfortable"),
     csrf_token: str = Form(),
     database: Session = Depends(get_db),
 ):
@@ -215,6 +322,9 @@ def update_settings(
         or updates_days not in {1, 7, 30, 90}
         or updates_limit not in {1, 5, 10, 20, 50}
         or theme not in THEME_CHOICES
+        or appearance_preset not in PRESET_VALUES
+        or background_style not in BACKGROUND_VALUES
+        or display_density not in DENSITY_VALUES
     ):
         return render(
             request,
@@ -231,6 +341,9 @@ def update_settings(
     user.notify_calls = notify_calls
     user.accept_calls = accept_calls
     user.theme = theme
+    user.appearance_preset = appearance_preset
+    user.background_style = background_style
+    user.display_density = display_density
     database.commit()
     response = RedirectResponse("/settings?saved=1", status_code=303)
     # Signing out keeps the same look on this device.
@@ -495,7 +608,7 @@ def export_account(request: Request, database: Session = Depends(get_db)):
     }
     return JSONResponse(
         jsonable_encoder(payload),
-        headers={"Content-Disposition": 'attachment; filename="soccom-export.json"'},
+        headers={"Content-Disposition": 'attachment; filename="social-plus-export.json"'},
     )
 
 
@@ -583,8 +696,19 @@ def delete_account(
     database.query(ContentReport).filter(ContentReport.reporter_id == user.id).update(
         {ContentReport.reason: "Reporter account deleted."}, synchronize_session=False
     )
-    # Attachment objects go before their rows. Access is revoked either way, but deleting the
-    # object first means the bytes do not outlive the record that made them reachable.
+    # Attachment and avatar objects go before their reference. Access is revoked either way,
+    # but deleting the object first means the bytes do not outlive the record that made them
+    # reachable.
+    if user.avatar_key:
+        try:
+            get_storage().delete(user.avatar_key)
+        except StorageError:
+            logger.warning(
+                "could not remove the avatar object of a deleted account",
+                extra={"event": "account.avatar_delete_failed", "user_id": str(user.id)},
+            )
+    user.avatar_key = None
+    user.avatar_mime_type = None
     delete_attachments_for_owner(database, owner_user_id=user.id)
     user.email = f"deleted+{user.id.hex}@deleted.invalid"
     user.username = f"deleted_{user.id.hex[:16]}"

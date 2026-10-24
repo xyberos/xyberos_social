@@ -30,6 +30,17 @@ class User(Base):
         CheckConstraint("updates_days IN (1, 7, 30, 90)", name="ck_user_updates_days"),
         CheckConstraint("updates_limit IN (1, 5, 10, 20, 50)", name="ck_user_updates_limit"),
         CheckConstraint("theme IN ('system', 'light', 'dark')", name="ck_user_theme"),
+        CheckConstraint(
+            "appearance_preset IN ('forest', 'ocean', 'violet', 'sunset', 'midnight')",
+            name="ck_user_appearance_preset",
+        ),
+        CheckConstraint(
+            "background_style IN ('paper', 'mist', 'dawn', 'aurora')",
+            name="ck_user_background_style",
+        ),
+        CheckConstraint(
+            "display_density IN ('comfortable', 'compact')", name="ck_user_display_density"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -48,6 +59,24 @@ class User(Base):
     accept_calls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Follows the device until the reader chooses; the cookie mirrors this for signed-out pages.
     theme: Mapped[str] = mapped_column(String(8), default="system", nullable=False)
+    appearance_preset: Mapped[str] = mapped_column(String(16), default="forest", nullable=False)
+    background_style: Mapped[str] = mapped_column(String(16), default="paper", nullable=False)
+    display_density: Mapped[str] = mapped_column(String(16), default="comfortable", nullable=False)
+    avatar_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_mime_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    @property
+    def avatar_url(self) -> str | None:
+        """The versioned public URL, or `None` when the initial should be shown.
+
+        The storage key is unique per upload, so including its last segment makes a
+        replacement a new URL and no browser serves a previously cached image.
+        """
+        if not self.avatar_key:
+            return None
+        version = self.avatar_key.rsplit("/", 1)[-1]
+        return f"/avatars/{self.id}?v={version}"
+
     updates_source: Mapped[str] = mapped_column(String(16), default="all", nullable=False)
     updates_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     updates_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)

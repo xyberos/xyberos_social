@@ -122,7 +122,12 @@ Steps 3-4 run the application on the host interpreter. To run the same applicati
 
 ```powershell
 docker compose up -d --build app     # builds the Dockerfile and serves http://localhost:8010
+docker compose exec -T app alembic -c backend/alembic.ini upgrade head
 ```
+
+The container deliberately does not apply migrations on startup. Run the second command after
+the first start and whenever a new migration is added; without it, database-backed pages such as
+registration cannot create their browser session.
 
 Attachment bytes need object storage:
 
@@ -155,7 +160,7 @@ as well, start the optional scanner and set `CLAMAV_HOST=localhost`:
 docker compose --profile scanning up -d    # first start downloads virus signatures, so it is slow
 ```
 
-The container publishes 8010 because 8000 belongs to the local `uvicorn` workflow, and the Compose project is pinned as `soccom` in `docker-compose.yml` so renaming the working directory cannot fork the stack into a second, empty volume. It runs as an unprivileged user and carries a health check against `/healthz`.
+The container publishes 8010 because 8000 belongs to the local `uvicorn` workflow, and the Compose project is pinned as `social+` in `docker-compose.yml` so renaming the working directory cannot fork the stack into a second, empty volume. It runs as an unprivileged user and carries a health check against `/healthz`.
 
 The Compose credentials are for local development only. Production settings require PostgreSQL, HTTPS, Secure cookies, and SMTP with STARTTLS. The built-in IP rate limiter is process-local; enforce rate limits at the edge as well, especially when running multiple workers. HTMX is pinned to a CDN release in the base template; self-host that asset before public launch.
 
@@ -174,11 +179,11 @@ The tests use an isolated in-memory SQLite database. Apply and verify Alembic mi
 
 ```powershell
 $env:PYTHONPATH = "backend"
-$env:SOCCOM_MIGRATION_TEST_DATABASE_URL = "postgresql+psycopg://soccom:soccom@localhost:5433/soccom_test"
+$env:SOCIAL_PLUS_MIGRATION_TEST_DATABASE_URL = "postgresql+psycopg://social+:social+@localhost:5433/social+_test"
 pytest backend\tests\test_migrations.py
 ```
 
-Create the `soccom_test` database once against the Compose PostgreSQL instance before running the rehearsal. The test leaves that database at head.
+Create the `social+_test` database once against the Compose PostgreSQL instance before running the rehearsal. The test leaves that database at head.
 
 ## Operations
 
@@ -187,7 +192,7 @@ Create the `soccom_test` database once against the Compose PostgreSQL instance b
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.
 - Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, the configured object-storage origin that browsers upload attachments to, and `blob:` images for an attachment the reader already received) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses.
-- `GET /metrics` exposes `soccom_http_requests_total`, `soccom_http_request_duration_seconds`, `soccom_uptime_seconds`, `soccom_db_pool_connections`, `soccom_outbox_unpublished_events`, and `soccom_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
+- `GET /metrics` exposes `social_plus_http_requests_total`, `social_plus_http_request_duration_seconds`, `social_plus_uptime_seconds`, `social_plus_db_pool_connections`, `social_plus_outbox_unpublished_events`, and `social_plus_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
 - `ops/` holds the beta evidence and procedures. `alerts.yml` carries rules for error rate, latency, pool saturation, stuck idempotency keys, outbox backlog, and restore-rehearsal staleness; `runbooks.md` says what to do for each and lists the owners this phase still needs; `rehearse-restore.ps1` dumps the database, restores it into a scratch database, and compares every table's row count and the migration revision; `loadtest.py` measures p95 latency and error rate against documented budgets.
 - Accessibility is asserted rather than assumed: `backend/tests/test_accessibility.py` parses every rendered page and fails on a missing document language, an unlabelled control, an image without `alt`, a button with no accessible name, or a positive `tabindex`.
 
@@ -202,6 +207,18 @@ The integration hooks that keep the commercial phases from reworking the social 
 - **Scope predicates.** `core/scoping.py` gives every scope-carrying table one `(scope_type, scope_id)` predicate, `scoped_select`/`scoped_get` for reads, and `ScopeViolation` for a mismatch, which `api/middleware.py` answers with the same non-revealing 404 as a missing row. `business` is reserved for Phase 11, and `platform` covers records that must outlive a tenant.
 
 Ids in audit and outbox payloads are strings, and a payload carries only what a consumer needs to act on: the report reason, for example, stays in `content_reports`, where account deletion can redact it.
+
+## Profiles and avatars
+
+Since `0021_user_avatar`, an avatar is uploaded from `/profile` as one multipart image no larger
+than 5 MB. The route detects the type from the bytes (JPEG, PNG, GIF, or WebP only), applies the
+EXIF orientation, and re-encodes the pixels so location, device, and author metadata do not
+survive. The bytes go to object storage under a key unique to that upload, and the account row
+keeps only the key and the detected mime type. `GET /avatars/{user_id}` serves the sanitized
+image for an active account; the URL carries the key's version segment, so a replacement is
+fetched immediately instead of being served from the browser cache. Removing the photo clears
+the reference and the reader's initial is shown instead; deleting the account removes the
+object with the rest of its media.
 
 ## Attachments
 
@@ -420,7 +437,7 @@ shows that a fingerprint substituted during signaling changes the number.
   invited. `CALL_CONCURRENT_LIMIT` caps open calls per worker, and `CALL_START_LIMIT_PER_MINUTE`
   rate-limits ring attempts.
 - **Fair use.** Rounds are bounded in size, signals are bounded in number, and every refusal is
-  counted in `soccom_call_rejections_total`.
+  counted in `social_plus_call_rejections_total`.
 
 ### TURN
 
@@ -445,16 +462,16 @@ A relay-only path is an operator check rather than an automated one:
 2. in `chrome://webrtc-internals` (or `about:webrtc` in Firefox), confirm the selected candidate
    pair is `relay` on both sides;
 3. in the coturn log, confirm one allocation per participant and no key material or media;
-4. the safety numbers still match, and `soccom_call_signals_total` keeps rising while media
+4. the safety numbers still match, and `social_plus_call_signals_total` keeps rising while media
    flows — the relay, not the application, is carrying the call.
 
 ### Operational facts
 
-Metrics: `soccom_calls_started_total{media,kind}`, `soccom_calls_ended_total{reason}`,
-`soccom_call_signals_total{signal}`, `soccom_call_rejections_total{reason}`, plus the
-`soccom_calls_active` and `soccom_call_participants_joined` gauges and the
-`soccom_call_ring_duration_seconds` histogram (ring to first accept, the server's view of join
-latency). A client-reported connection failure lands in `soccom_calls_ended_total{reason="failed"}`,
+Metrics: `social_plus_calls_started_total{media,kind}`, `social_plus_calls_ended_total{reason}`,
+`social_plus_call_signals_total{signal}`, `social_plus_call_rejections_total{reason}`, plus the
+`social_plus_calls_active` and `social_plus_call_participants_joined` gauges and the
+`social_plus_call_ring_duration_seconds` histogram (ring to first accept, the server's view of join
+latency). A client-reported connection failure lands in `social_plus_calls_ended_total{reason="failed"}`,
 which is the drop rate; relay usage share belongs to the TURN server's own metrics, not the
 application. Media quality is a browser concern, and it is bounded: Opus runs at 32 kbit/s with
 DTX and in-band FEC, video is capped per peer at 1.2 Mbit/s for one other participant,
