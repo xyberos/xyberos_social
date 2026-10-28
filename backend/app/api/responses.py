@@ -10,6 +10,7 @@ from app.api.deps import form_context, set_session_cookie, theme_from_cookie
 from app.core.theme import THEME_OPTIONS, THEME_CHOICES, option_for, resolve_theme
 from app.core.appearance import BACKGROUND_OPTIONS, DENSITY_OPTIONS, PRESETS
 from app.core.seo import DEFAULT_DESCRIPTION, SITE_NAME, canonical_url, describe, site_url
+from app.core.assets import static_url
 from app.models import UserSession
 from app.services.messaging import unread_message_total
 
@@ -21,6 +22,9 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 # A page writes its summary once; the helper bounds it to a snippet and collapses the
 # whitespace a multi-line body would otherwise put inside an attribute.
 templates.env.globals["describe"] = describe
+# Every asset address carries the digest of its bytes, so a browser can keep it forever and a
+# deploy still reaches a returning reader.
+templates.env.globals["static_url"] = static_url
 
 
 def _shell_context(request: Request, context: dict) -> dict:

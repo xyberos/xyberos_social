@@ -496,7 +496,8 @@ def test_a_photo_is_a_tile_that_loads_its_preview_and_links_the_original(
     assert f'data-full="/attachments/{media["id"]}/download"' in page.text
     # Without the viewer, the link opens the original in a new tab.
     assert 'target="_blank"' in page.text
-    assert 'src="/static/js/gallery.js"' in page.text
+    # The viewer script is loaded, under a versioned address.
+    assert 'src="/static/js/gallery.js?v=' in page.text
 
 
 def test_three_photos_lay_out_as_a_lead_tile_with_two_alongside(client_factory, storage):

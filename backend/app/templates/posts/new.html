@@ -15,6 +15,6 @@
 </section>
 {# Loaded from inside the swapped region: hx-boost replaces #main-content and never re-runs
    the head, so a page-level script has to travel with the page it belongs to. #}
-<script defer src="/static/js/compose-media.js"></script>
-<script defer src="/static/js/post-composer.js"></script>
+<script defer src="{{ static_url('js/compose-media.js') }}"></script>
+<script defer src="{{ static_url('js/post-composer.js') }}"></script>
 {% endblock %}

@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import client_key
 from app.api.responses import render
+from app.core.assets import is_current_version
 from app.core.config import get_settings
 from app.core.metrics import http_request_duration, http_requests, route_label, status_class
 from app.core.observability import REQUEST_ID_HEADER, request_id_var, resolve_request_id
@@ -92,10 +93,18 @@ async def add_security_headers(request: Request, call_next):
         )
     if get_settings().app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # Stylesheets and scripts are not content-hashed, so a heuristic freshness window keeps a
-    # returning browser on yesterday's CSS after a deploy. Revalidating is cheap and correct.
+    # An asset address carries the digest of its bytes, so a reader who names the current version
+    # can keep it indefinitely: a deploy changes the address, not the cache entry. A request for
+    # any other version — or none, which is what a direct visit sends — revalidates instead, so a
+    # stale address can never pin old CSS into a browser.
     if request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-cache"
+        # The helper keys on the path under `static/`, not the request path, which carries the
+        # mount prefix.
+        relative = request.url.path[len("/static/") :]
+        if is_current_version(relative, request.query_params.get("v")):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
     return response
 
 
