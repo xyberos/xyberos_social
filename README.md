@@ -33,7 +33,8 @@ The same server-rendered pages serve a phone; there is no second client and no s
 - **Touch targets.** Tab items are 44px or taller, and `@media (pointer: coarse)` raises every text button — Block, Remove, Report — to 44px, since those are both the smallest and the most consequential controls. `touch-action: manipulation` removes the double-tap delay.
 - **Installable.** `/manifest.webmanifest` is served from a route rather than a static file, because `StaticFiles` guesses the content type from the extension and a manifest with the wrong type is ignored. It names a 192px and a 512px icon plus a maskable 512px one, and `theme-color` follows the light and dark scheme so browser chrome matches the page.
 - **Both faces are self-hosted.** `/static/fonts/inter-latin.woff2` (48 KB) and a subset of Material Symbols Rounded (24 KB) are preloaded from this origin, so no third-party stylesheet sits on the critical path and `font-src`/`style-src` name no external host. The published icon font carries 6,660 glyphs and weighs 1.4 MB; the subset carries the 58 the pages name.
-- **Asset addresses carry a digest.** `static_url()` in `app/core/assets.py` renders `/static/css/styles.css?v=<digest of its bytes>`, so the URL is the version: a deploy changes the address, and the response for the current one is `public, max-age=31536000, immutable`. A request for any other version — including a plain `/static/...` visit — gets `no-cache`, so a stale address can never pin yesterday's CSS into a browser. On a second page load the stylesheet and eight scripts transfer zero bytes. The two fonts stay unversioned on purpose: a stylesheet cannot know a digest, so versioning them in the HTML would not match the `@font-face` URL, the browser would discard the preload, and the file would be fetched twice. They revalidate instead, which is a 304.
+- **Asset addresses carry a digest.** `static_url()` in `app/core/assets.py` renders `/static/css/styles.min.css?v=<digest of its bytes>`, so the URL is the version: a deploy changes the address, and the response for the current one is `public, max-age=31536000, immutable`. A request for any other version — including a plain `/static/...` visit — gets `no-cache`, so a stale address can never pin yesterday's CSS into a browser. On a second page load the stylesheet and eight scripts transfer zero bytes. The two fonts stay unversioned on purpose: a stylesheet cannot know a digest, so versioning them in the HTML would not match the `@font-face` URL, the browser would discard the preload, and the file would be fetched twice. They revalidate instead, which is a 304.
+- **The stylesheet ships minified.** `static/css/styles.min.css` is generated from `styles.css` by `python -m app.core.assets --write` and is 17% smaller; `styles.css` stays served for debugging. The minifier is a small scanner rather than a regex, because this sheet contains quoted strings and `calc(100dvh - 200px)` where a space is part of the expression. It only removes whitespace around `{`, `}`, `;` and `,` — never around `:` or inside `calc()`. `test_assets.py` fails when the artifact is stale, and the two sheets were compared in a browser across 147 elements with zero computed-style differences.
 
 ### Rebuilding the icon subset
 
@@ -225,6 +226,15 @@ pytest backend\tests
 ```
 
 The tests use an isolated in-memory SQLite database. Apply and verify Alembic migrations against PostgreSQL as part of local setup and CI.
+
+Two committed artifacts are generated rather than hand-written, and both have a test that fails when they fall behind their source:
+
+```powershell
+$env:PYTHONPATH = "backend"
+python -m app.core.assets --write     # rebuild static/css/styles.min.css
+```
+
+The icon font subset is rebuilt separately; see [Rebuilding the icon subset](#rebuilding-the-icon-subset).
 
 ### Migration rollback rehearsal
 
