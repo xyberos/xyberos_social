@@ -1,9 +1,10 @@
 """Personal updates: a post that belongs to an account instead of a community.
 
-An update has an audience — its author always, and then only me, followers, or everyone — so
-the interesting cases are the readers the choice excludes: every one of them must fail closed
-with the same 404 a missing post returns, and the author's page must show each reader exactly
-the updates the post page would let them open.
+An update has an audience — its author always, and then only me, followers, everyone, or the
+open web — so the interesting cases are the readers the choice excludes: every one of them must
+fail closed with the same 404 a missing post returns, and the author's page must show each
+reader exactly the updates the post page would let them open. `public` is the one value a
+signed-out reader can satisfy, which is why it is also the only one a crawler may index.
 """
 
 import html
@@ -263,7 +264,7 @@ def test_the_workspace_needs_an_account(client_factory):
     assert response.headers["location"] == "/login"
 
 
-def test_the_composer_offers_three_audiences(client_factory):
+def test_the_composer_offers_four_audiences(client_factory):
     author = client_factory()
     register(author, "author")
 
@@ -272,6 +273,7 @@ def test_the_composer_offers_three_audiences(client_factory):
     assert 'value="followers" selected' in compose.text
     assert 'value="only_me"' in compose.text
     assert 'value="everyone"' in compose.text
+    assert 'value="public"' in compose.text
 
     refused = author.post(
         "/posts",
@@ -719,3 +721,86 @@ def test_the_post_view_is_shared_by_personal_updates_and_community_posts(client_
         assert '<article class="thread-post">' in view.text
         assert '<div class="comment-list">' in view.text
         assert 'class="comment-compose"' in view.text
+
+
+def test_a_public_update_is_readable_without_an_account(client_factory):
+    author = client_factory()
+    stranger = client_factory()
+    anonymous = client_factory()
+    register(author, "author")
+    register(stranger, "stranger")
+
+    location = publish_with_audience(author, "public", "Open to the web.")
+
+    page = anonymous.get(location)
+    assert page.status_code == 200
+    assert "Open to the web." in page.text
+    # The open web is exactly this one audience; the others stay behind the account they name.
+    for audience in ("followers", "everyone", "only_me"):
+        closed = publish_with_audience(author, audience, f"Closed to the web: {audience}.")
+        assert anonymous.get(closed).status_code == 404, audience
+    assert stranger.get(location).status_code == 200
+    # Only the audience the web can read may enter an index.
+    assert '<meta name="robots" content="index, follow">' in page.text
+    closed_page = stranger.get(publish_with_audience(author, "everyone", "Signed-in only."))
+    assert '<meta name="robots" content="noindex, nofollow">' in closed_page.text
+
+
+def test_a_public_update_can_be_opened_and_closed_again(client_factory):
+    author = client_factory()
+    anonymous = client_factory()
+    register(author, "author")
+    location = publish_with_audience(author, "followers", "Decided later.")
+    assert anonymous.get(location).status_code == 404
+
+    for audience, reachable in (("public", 200), ("followers", 404)):
+        workspace = author.get("/workspace")
+        changed = author.post(
+            f"{location}/audience",
+            data={
+                "csrf_token": csrf_from(workspace.text),
+                "audience": audience,
+                "return_to": "/workspace",
+            },
+            follow_redirects=False,
+        )
+        assert changed.status_code == 303
+        assert anonymous.get(location).status_code == reachable, audience
+
+
+def test_a_block_still_hides_a_public_update_from_the_blocked_reader(client_factory):
+    author = client_factory()
+    reader = client_factory()
+    register(author, "author")
+    register(reader, "reader")
+
+    location = publish_with_audience(author, "public", "Open to the web.")
+    assert reader.get(location).status_code == 200
+
+    people = reader.get("/people")
+    assert (
+        reader.post(
+            f"/people/{person_id(reader, 'author')}/block",
+            data={"csrf_token": csrf_from(people.text)},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+
+    # A block is a statement about a person, so it outranks an audience the web may read.
+    assert reader.get(location).status_code == 404
+
+
+def test_a_public_update_leaves_with_its_account(client_factory, database_factory):
+    author = client_factory()
+    anonymous = client_factory()
+    register(author, "author")
+    location = publish_with_audience(author, "public", "Open to the web.")
+    assert anonymous.get(location).status_code == 200
+
+    # Deletion keeps the row and erases the account; nothing it published stays readable.
+    with database_factory() as database:
+        database.scalar(select(User).where(User.username == "author")).is_active = False
+        database.commit()
+
+    assert anonymous.get(location).status_code == 404

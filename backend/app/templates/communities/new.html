@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% block title %}Create community | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="profile-layout community-create-layout">
   {{ page_heading('Start a gathering', 'Create a community.', 'Choose a clear name and decide whether anyone can find it.') }}

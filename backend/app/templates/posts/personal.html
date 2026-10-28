@@ -5,11 +5,36 @@
 {# The author's own page is the profile, and publishing happens on the compose page. #}
 {% set author_url = '/profile' if user and user.id == author.id else '/people/' ~ author.id %}
 {% block title %}{{ post.title or 'Update by ' ~ author.display_name }} | Social+{% endblock %}
+{# Only a public update can be read signed out, so only that one may be indexed; the audience
+   rule and the crawler rule stay the same rule. #}
+{% block robots %}{% if post.audience == 'public' and not post.removed_at %}index, follow{% else %}noindex, nofollow{% endif %}{% endblock %}
+{% block description %}{{ describe(post.body, (post.title if post.title else 'An update by ' ~ author.display_name) ~ ' on Social+.') }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block structured_data %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SocialMediaPosting",
+      "headline": {{ (post.title or 'Update by ' ~ author.display_name)|tojson }},
+      "articleBody": {{ describe(post.body, '', 500)|tojson }},
+      "url": {{ canonical_url|tojson }},
+      "datePublished": {{ post.created_at.isoformat()|tojson }},
+      "author": {
+        "@type": "Person",
+        "name": {{ author.display_name|tojson }}
+      }
+    }
+  </script>
+{% endblock %}
 {% block content %}
 <section class="thread-layout">
   <a class="back-link" href="{{ author_url }}">← {{ author.display_name }}</a>
   {% if error == 'slow-down' %}<p class="alert" role="alert">You’re replying too quickly. Try again in a moment.</p>{% endif %}
   {% if error == 'invalid-comment' %}<p class="alert" role="alert">Comments must contain 1–5,000 characters.</p>{% endif %}
+  {% if error == 'invalid-report' %}<p class="alert" role="alert">Add a short reason for the report.</p>{% endif %}
+  {% if error == 'already-reported' %}<p class="success" role="status">You already reported this content.</p>{% endif %}
+  {% if error == 'invalid-appeal' %}<p class="alert" role="alert">Add a short reason for the appeal.</p>{% endif %}
+  {% if error == 'already-appealed' %}<p class="success" role="status">You already appealed this removal.</p>{% endif %}
 
   {% call show_post_card(post, author, none, author_url, media) %}
     <div class="thread-actions">
@@ -18,18 +43,42 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="text-button danger-button" type="submit">Remove update</button>
         </form>
+      {% elif user and not post.removed_at and ('post', post.id) not in reported %}
+        <details class="report-details"><summary>Report post</summary>
+          <form method="post" action="/posts/{{ post.id }}/reports/post/{{ post.id }}" class="report-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="visually-hidden" for="post-report">Why are you reporting this post?</label>
+            <input id="post-report" name="reason" maxlength="1000" placeholder="Reason for report" required>
+            <button class="text-button danger-button" type="submit">Send report</button>
+          </form>
+        </details>
+      {% elif user and ('post', post.id) in reported %}<span class="muted-status">Reported</span>{% endif %}
+      {% if appeal %}
+        <p class="muted-status">Appeal {% if appeal.status == 'pending' %}submitted, awaiting review{% elif appeal.status == 'granted' %}granted{% else %}denied{% endif %}.</p>
+      {% elif appealable %}
+        <details class="report-details"><summary>Appeal this removal</summary>
+          <form method="post" action="/posts/{{ post.id }}/appeals/post/{{ post.id }}" class="report-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="visually-hidden" for="post-appeal">Why should this removal be reviewed?</label>
+            <textarea id="post-appeal" name="reason" rows="2" maxlength="2000" placeholder="Why should this be restored?" required></textarea>
+            <button class="text-button" type="submit">Send appeal</button>
+          </form>
+        </details>
       {% endif %}
     </div>
   {% endcall %}
 
-  {# Everyone who can read a personal update is in its audience, so anyone reading this
-     page may reply. Reports stay community-scoped: there is no moderator for a page the
-     author owns, and the audience is limited to people who chose to follow them. #}
+  {# Everyone who can read a personal update is in its audience, so anyone reading this page
+     may reply — unless the author's community-free page has been locked by a platform
+     moderator or removed. Reports go to the platform queue, because a personal update has no
+     community moderator to receive them. #}
   {% if user and post.removed_at %}
     {% set notice = ('locked-notice', 'This update was removed. New replies are closed.') %}
+  {% elif user and post.is_locked %}
+    {% set notice = ('locked-notice', 'A moderator locked this discussion. New replies are closed.') %}
   {% else %}
     {% set notice = none %}
   {% endif %}
-  {{ show_comments(post, user, comments, csrf_token, comments_base, user and not post.removed_at, user and user.id == post.author_id, '', [], notice) }}
+  {{ show_comments(post, user, comments, csrf_token, comments_base, user and not post.removed_at and not post.is_locked, user and user.id == post.author_id, ('/posts/' ~ post.id ~ '/reports/comment') if user else '', reported, notice) }}
 </section>
 {% endblock %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/auth_layout.html" import auth_layout %}
-{% block title %}Create account | X-Social{% endblock %}
+{% block title %}Create account | Social+{% endblock %}
+{% block description %}Create a Social+ account: choose the people and communities you follow, then read a finite feed instead of an endless one.{% endblock %}
 {% block content %}
 {% call auth_layout(
   {'eyebrow': 'Make yourself at home', 'title': 'A little more', 'emphasis': 'intentional.',

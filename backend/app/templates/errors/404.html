@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Page not found | Social+{% endblock %}
+{% block description %}That address does not exist on Social+. Browse the public communities to find the conversation you were looking for.{% endblock %}
+{% block robots %}noindex, follow{% endblock %}
+{% block content %}
+<section class="directory-layout">
+  {% call page_heading('404', 'We could not find that page', 'The address may have moved, or the post may have been withdrawn by its author.') %}
+    <a class="button button-primary" href="/communities"><span class="material-symbols-rounded" aria-hidden="true">groups</span>Browse communities</a>
+  {% endcall %}
+</section>
+{% endblock %}

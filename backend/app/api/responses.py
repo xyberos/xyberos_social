@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.deps import form_context, set_session_cookie, theme_from_cookie
 from app.core.theme import THEME_OPTIONS, THEME_CHOICES, option_for, resolve_theme
 from app.core.appearance import BACKGROUND_OPTIONS, DENSITY_OPTIONS, PRESETS
+from app.core.seo import DEFAULT_DESCRIPTION, SITE_NAME, canonical_url, describe, site_url
 from app.models import UserSession
 from app.services.messaging import unread_message_total
 
@@ -16,6 +17,10 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+# A page writes its summary once; the helper bounds it to a snippet and collapses the
+# whitespace a multi-line body would otherwise put inside an attribute.
+templates.env.globals["describe"] = describe
 
 
 def _shell_context(request: Request, context: dict) -> dict:
@@ -64,6 +69,12 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         request=request,
         name=name,
         context={
+            # Crawl metadata every page needs and none should have to restate. A template's
+            # `description` block, or an explicit context value, overrides these defaults.
+            "site_name": SITE_NAME,
+            "site_url": site_url(),
+            "canonical_url": canonical_url(request),
+            "seo_description": DEFAULT_DESCRIPTION,
             **context,
             **_shell_context(request, context),
             **_theme_context(request, context),

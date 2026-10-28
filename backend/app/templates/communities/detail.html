@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% from "partials/avatar.html" import avatar %}
 {% block title %}{{ community.name }} | Social+{% endblock %}
+{% block description %}{{ describe(community.description, community.name ~ ' — a community on Social+ where members share posts and comments.') }}{% endblock %}
+{% block robots %}{% if community.visibility == 'public' %}index, follow{% else %}noindex, nofollow{% endif %}{% endblock %}
+{% block structured_data %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Social+", "item": {{ site_url|tojson }}},
+        {"@type": "ListItem", "position": 2, "name": "Communities", "item": {{ (site_url ~ '/communities')|tojson }}},
+        {"@type": "ListItem", "position": 3, "name": {{ community.name|tojson }}, "item": {{ canonical_url|tojson }}}
+      ]
+    }
+  </script>
+{% endblock %}
 {% block content %}
 <section class="community-layout">
   <a class="back-link" href="/communities">← All communities</a>

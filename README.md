@@ -17,6 +17,7 @@ Social+ is a finite social communication platform. Phases 1–6 of [implementati
 - Relationships: follows and blocks are unique directed edges. A block prevents follows in either direction and removes follows already present between the two accounts.
 - Communities: public communities are discoverable and joinable by signed-in users. Private communities do not appear in discovery and return a non-revealing 404 to non-members; owners and moderators can invite users by username. Owners alone can grant or revoke moderator roles; moderators can remove ordinary members. Administrative changes are audited.
 - Discussions: community members can create bounded text posts and threaded comments. Post reads respect community privacy and block relationships. Authors can remove their own content; owners/moderators can remove content, lock discussions, review reports, and leave moderation events. Exact duplicate posts and rapid posting are rate-limited.
+- Platform moderation: a personal update belongs to an account, so a report about one has no community to go to. Signed-in readers report a post or comment from its page, and the platform queue at `/moderation` answers it. Only an account whose `is_moderator` flag an operator set can open the queue; the four decisions — dismiss, remove, lock, suspend — are audited in `platform_audit_events` and notified to the reporter. A removal can be appealed once by its author, and granting the appeal restores the content. See [Platform moderation queue](#platform-moderation-queue).
 - Chat: the inbox holds persisted one-to-one and small-group text conversations, read state, and authenticated WebSocket delivery. Direct-message blocks stop new sends while preserving history. Group messages remain shared by active participants; membership additions, removals, and departures are auditable, and removed members lose live access without deleting history. A conversation opens on its first unread message — the newest one when nothing is unread — and follows arriving messages only while the reader is already at the end, so scrolling back is never interrupted. Every signed-in page also holds `/ws/inbox`, which carries only the reader's own unread total so the Chat badge updates without a reload. WebSocket fan-out is process-local, so use one app worker until shared fan-out is added. Conversations also carry 1:1 and group audio and video calls (see [Calls](#calls)). Presence, media on posts, and end-to-end message encryption are not in the current build.
 
 ## Interface and themes
@@ -164,6 +165,23 @@ The container publishes 8010 because 8000 belongs to the local `uvicorn` workflo
 
 The Compose credentials are for local development only. Production settings require PostgreSQL, HTTPS, Secure cookies, and SMTP with STARTTLS. The built-in IP rate limiter is process-local; enforce rate limits at the edge as well, especially when running multiple workers. HTMX is pinned to a CDN release in the base template; self-host that asset before public launch.
 
+## Search engines
+
+The application is server-rendered, so a crawler reads the same HTML a browser does. Two routes make the crawl surface explicit:
+
+- `GET /robots.txt` allows the public pages, disallows every prefix behind the sign-in wall, and names the sitemap.
+- `GET /sitemap.xml` lists only what a signed-out visitor can read: the landing page, the public community directory, public communities, and the posts inside them. A private community answers 404 to an anonymous visitor, so it is never listed.
+
+Every page states a `<meta name="description">`, a `<link rel="canonical">`, and a `<meta name="robots">`. The canonical drops the query string, so a filter, cursor, or banner never splits one page into several addresses. Walled pages add `X-Robots-Tag: noindex, nofollow` to the response it actually sends — the redirect included — and a missing page answers in the application shell with a 404 status, while a caller that does not accept HTML still gets the JSON body. Absolute URLs come from `APP_BASE_URL`, so a deployment must set it to its public origin.
+
+Titles use one brand (`Social+`) everywhere, and public pages carry schema.org JSON-LD: `WebSite` and `Organization` on the landing page, `BreadcrumbList` on a community or post page, and `DiscussionForumPosting` or `SocialMediaPosting` on a post. The brand, the description, and the robots directive each live in a template block, so a new page inherits a sensible default and overrides only what differs.
+
+A personal update enters the sitemap only when its author chose `public`. `everyone` still
+means every signed-in account, so a signed-out reader gets the same 404 a missing post returns
+and a crawler never sees one. `posts/personal.html` marks a `public` update `index, follow` and
+every other audience `noindex, nofollow`; a public update's media is readable without a session
+for the same reason its page is.
+
 ## Checks
 
 ```powershell
@@ -191,7 +209,7 @@ Create the `social+_test` database once against the Compose PostgreSQL instance 
 - `GET /readyz` is readiness: it runs `SELECT 1` and answers `503 {"status": "unavailable"}` when the database is unreachable, so traffic can be drained without killing the process.
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.
-- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, the configured object-storage origin that browsers upload attachments to, and `blob:` images for an attachment the reader already received) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses.
+- Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a `Content-Security-Policy` limited to same-origin connections plus the HTMX bundle, Google Fonts, the configured object-storage origin that browsers upload attachments to, and `blob:` images for an attachment the reader already received) are set on every response; production also sends `Strict-Transport-Security`. The generated API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`) get a separate policy that also allows the jsDelivr assets and the inline bootstrap script Swagger UI and ReDoc require, so a blank docs page means that policy was tightened too far. A route may set its own policy, which is how attachment delivery serves stored media under a narrower one. The base template switches off HTMX's inline indicator stylesheet, which this policy would block and which no template here uses. Pages behind the sign-in wall also send `X-Robots-Tag: noindex, nofollow`; see [Search engines](#search-engines).
 - `GET /metrics` exposes `social_plus_http_requests_total`, `social_plus_http_request_duration_seconds`, `social_plus_uptime_seconds`, `social_plus_db_pool_connections`, `social_plus_outbox_unpublished_events`, and `social_plus_idempotency_keys_in_progress` in the Prometheus text format. Routes are labelled by their template with path parameters substituted back out, and unmatched requests share one placeholder, so no path parameter can multiply a series. A failed database read drops the queue gauges instead of failing the scrape, because metrics matter most while the database is down. It is exportable rather than public: expose it only to your scraper at the edge, since aggregate request and saturation data is still operational data.
 - `ops/` holds the beta evidence and procedures. `alerts.yml` carries rules for error rate, latency, pool saturation, stuck idempotency keys, outbox backlog, and restore-rehearsal staleness; `runbooks.md` says what to do for each and lists the owners this phase still needs; `rehearse-restore.ps1` dumps the database, restores it into a scratch database, and compares every table's row count and the migration revision; `loadtest.py` measures p95 latency and error rate against documented budgets.
 - Accessibility is asserted rather than assumed: `backend/tests/test_accessibility.py` parses every rendered page and fails on a missing document language, an unlabelled control, an image without `alt`, a button with no accessible name, or a positive `tabindex`.
@@ -360,13 +378,16 @@ Three things make media usable rather than merely storable:
   `Content-Range` rather than a re-download.
 
 Read authorization follows the post, not the file. A personal update's media is readable by
-whoever `can_read_personal_post` admits — its author, its audience, and never a blocked pair —
-and a community post's media needs a visible community and a non-blocked author. A removed post
-answers 404 for its files even to its author, because the reason the post is gone should stay
-gone. Unlike a chat attachment, post media is **not** released once a reader has it: a chat file
-exists to be received by the people it was addressed to, while a post is read by whoever arrives
-later, so its bytes stay until the account removes them. That is also why the account quota was
-raised to 1 GB.
+whoever `can_read_personal_post` admits — its author, its audience, never a blocked pair, and,
+for a `public` update, a reader with no account at all; an anonymous download is rate-limited
+by address because there is no account to name. A community post's media needs a visible
+community and a non-blocked author. Everything else stays closed to a request without a
+session: a conversation file, a draft, or a narrower audience answers the same 404 an id that
+never existed returns. A removed post answers 404 for its files even to its author, because the
+reason the post is gone should stay gone. Unlike a chat attachment, post media is **not**
+released once a reader has it: a chat file exists to be received by the people it was addressed
+to, while a post is read by whoever arrives later, so its bytes stay until the account removes
+them. That is also why the account quota was raised to 1 GB.
 
 A personal update may now be media alone. `0018_post_media` relaxed `ck_post_shape` so an empty
 body is legal; the route still refuses a post with neither text nor media, and duplicate
@@ -544,13 +565,22 @@ Migration `0013_post_audience` added `posts.audience`, one value of `AUDIENCES`
 - `everyone` — any signed-in account, follower or not. This is not a firehose: the dashboard is
   still the accounts the reader follows, so the choice widens who may read a post the reader
   reached on purpose instead of broadcasting it.
+- `public` — anyone at all, signed in or not. It is the only audience a reader without an
+  account can satisfy, so it is the only one that reaches a crawler: a `public` update appears
+  in `sitemap.xml` and carries `index, follow`, while every other audience carries
+  `noindex, nofollow` and answers the same 404 a missing post returns.
 
 `can_read_personal_post` (`app/services/authorization.py`) is the one read rule and
 `visible_personal_posts_condition` is that same rule as a SQL predicate, so a list query and a
-single-row read cannot drift apart. A block stays absolute and hides an `everyone` update just
-as it hides a `followers` one. A community post always carries `followers`, because a
-community post's audience is its community, and `ck_post_audience_scope` states that in the
-schema.
+single-row read cannot drift apart. A block stays absolute and hides a `public` update from the
+person blocked, exactly as it hides an `everyone` or a `followers` one: the block is a
+statement the author made about a person, not a property of the post, and an anonymous reader
+is nobody's blocked pair. A deactivated account answers 404 for everything it published, even
+while its rows remain, because deletion erases who the author was. A community post always
+carries `followers`, because a community post's audience is its community, and
+`ck_post_audience_scope` states that in the schema — a public community's posts are readable
+signed out through the community's own visibility rule, which is a separate decision from the
+post's audience column.
 
 Changing the audience is `POST /posts/{post_id}/audience`: the author alone, a 403 to a reader
 who can see the post but did not write it, a 422 for a value outside `AUDIENCES`, and the
@@ -558,15 +588,82 @@ non-revealing 404 for anyone the read rule already keeps out. The change is jour
 `post.audience.changed`, because who may read an update is a privacy boundary even though the
 row only records the value it now holds.
 
-Three boundaries are deliberate:
+Two boundaries are deliberate:
 
-- **No reporting or moderation.** `content_reports` is community-scoped and a moderator role
-  belongs to a community, so a page the author owns has no queue to report into. A personal
-  update is readable only by the people its author's audience choice names. A platform-level
-  report path is a product decision that is not made yet, not an oversight to patch locally.
-- **No lock.** Locking exists for moderators, and there is none on a personal page; the author
-  removes an update instead. The author can also remove a comment they did not write, because
-  the thread is theirs.
+- **Reporting is platform-wide, but the role is not self-granted.** A personal update has no
+  community owner, so its reports arrive in the platform queue at `/moderation`, which only an
+  account with `users.is_moderator` may open. Nothing in the application grants that flag; an
+  operator sets it, and `ops/runbooks.md` says how. A report can only name content the reporter
+  was already allowed to read, the reporter's own content is not reportable through the form,
+  and the same reporter may file once per target.
 - **Account scope, not community scope.** Audit and outbox rows for a personal update carry
   `account:<author>` rather than a community, which is what keeps them out of a community's
   trail when the author has no community at all.
+
+### Platform moderation queue
+
+Migration `0023_platform_moderation` made `content_reports.community_id` nullable and added
+`users.is_moderator`. A null community means a platform report: the target is a personal update
+(or one of its comments), which belongs to an account rather than a community, so there is no
+tenant queue to file it in. Community reports keep their community and stay with that
+community's owners and moderators — the two queues never read each other's rows, and
+`POST /moderation/reports/{id}/resolve` answers 404 for a community report.
+
+`/posts/{id}` renders a report control for a signed-in reader who is not the author, and a
+thread whose comments carry their own report control. Filing is
+`POST /posts/{post_id}/reports/{target_type}/{target_id}`. `find_personal_post` runs first, so a
+report can only ever name content the reporter's audience rule already admits — a `followers`
+post cannot be reported by a stranger, and the blocked-pair rule hides it from the person
+blocked. Reporting your own content is the same non-revealing 404, the reason is bounded to
+1-1000 characters, `uq_reporter_target` makes a second report a no-op, and the endpoint shares
+the platform's `report-content` rate limiter.
+
+A moderator opens `/moderation`, which is `noindex` and carries `X-Robots-Tag` like every other
+walled page, and records one of four decisions:
+
+| Decision | Effect |
+| --- | --- |
+| `dismiss` | The report closes as `dismissed`; the content is untouched. |
+| `remove` | `removed_at` and `removed_by_user_id` are set on the post or comment. The author sees a tombstone; everyone else, the open web included, gets the 404 a missing post returns. |
+| `lock` | `posts.is_locked` closes the thread. `POST /posts/{id}/comments` answers 409 and the composer is not drawn. The update itself stays readable. |
+| `suspend` | The author's `is_active` becomes false. `authenticated_user` already refuses an inactive account, so live sessions stop working on the next request and everything the account published answers 404. |
+
+Every decision writes a `platform_audit_events` row scoped to `platform` (suspension is scoped
+to the account it ends) with the actor, the target, before/after state, and the report's reason
+as the justification, plus the matching outbox event. The reporter is always told the outcome
+through a `moderation` notification; the author is told about `remove` and `lock`, and is not
+told about `suspend` because a suspended account cannot sign in to read it.
+
+Suspension is deliberately one-way in the UI: reinstating an account is an operator action, not
+a moderation decision, so the queue cannot be used to reverse itself. `ops/runbooks.md` carries
+both procedures.
+
+### Appeals
+
+Migration `0024_moderation_appeals` adds `moderation_appeals`, and a removal the queue decided
+can be questioned once by the content's author. The appeal control appears on the author's own
+view of a removed update, and `POST /posts/{post_id}/appeals/post/{post_id}` files it; the open
+appeals appear above the report queue at `/moderation`, where the same role grants or denies.
+
+An appeal is only accepted where there is a decision to answer. `file_moderation_appeal` refuses,
+with the same 404 a missing post returns:
+
+- a reader who is not the author — and `find_personal_post` already keeps everyone else out of a
+  removed post;
+- a post nobody removed, which is not an appeal at all;
+- a withdrawal the author made themselves, because there is no moderator decision behind it;
+- a community moderator's removal, which belongs to that community's owners. The check is
+  `platform_removal_report`: a resolved report with no community, so the platform role cannot
+  quietly overrule a tenant.
+
+`uq_appeal_target` makes a second appeal for the same target impossible, and the route
+pre-checks so the ordinary case is a redirect rather than a constraint violation. Granting
+clears `removed_at` and `removed_by_user_id`, so the update and its media return to whatever the
+audience allows; denying leaves the removal in place. Both write a `platform_audit_events` row
+with the appeal's reason as the justification, emit `moderation.appeal.granted` or
+`.denied`, and notify the author. Filing itself is not a privileged change, so it writes the
+`moderation.appeal.filed` outbox event but no audit row.
+
+Two limits are honest rather than hidden: a suspended author cannot file an appeal, because
+suspension ends the session that would file it, and a comment removal is not appealable yet —
+only the update is.

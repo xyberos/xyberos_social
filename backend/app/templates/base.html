@@ -11,6 +11,22 @@
 
     <title>{% block title %}Social+ | Communication, on your terms.{% endblock %}</title>
 
+    {# What the page is, said once: the snippet a result shows, the one address it belongs to,
+       and the card a share renders. A page that is walled, transitional, or transactional
+       overrides `robots` so it never enters an index. #}
+    <meta name="description" content="{% block description %}{{ seo_description }}{% endblock %}">
+    <meta name="robots" content="{% block robots %}index, follow{% endblock %}">
+    <link rel="canonical" href="{{ canonical_url }}">
+    <meta property="og:site_name" content="{{ site_name }}">
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+    <meta property="og:title" content="{{ self.title()|trim }}">
+    <meta property="og:description" content="{{ self.description()|trim }}">
+    <meta property="og:url" content="{{ canonical_url }}">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="{{ self.title()|trim }}">
+    <meta name="twitter:description" content="{{ self.description()|trim }}">
+    {% block structured_data %}{% endblock %}
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300,0..1,0&display=swap" rel="stylesheet">
@@ -54,6 +70,11 @@
               <a class="topbar-icon" href="/notifications" title="Notifications" aria-label="Notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}>
                 <span class="material-symbols-rounded" aria-hidden="true">notifications</span>
               </a>
+              {% if user.is_moderator %}
+                <a class="topbar-icon" href="/moderation" title="Moderation" aria-label="Moderation" {% if request.url.path.startswith('/moderation') %}aria-current="page"{% endif %}>
+                  <span class="material-symbols-rounded" aria-hidden="true">gavel</span>
+                </a>
+              {% endif %}
               {# A native disclosure, so the account menu opens and the logout form posts without
                  JavaScript. The token comes from the page context, like every other form.
                  hx-boost="false" opts out of the boosted header: these are account

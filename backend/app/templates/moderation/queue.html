@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "partials/page_heading.html" import page_heading %}
+{% block title %}Platform moderation | Social+{% endblock %}
+{% block description %}The platform queue for reports about personal updates.{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
+{% block content %}
+<section class="directory-layout report-queue-layout">
+  {{ page_heading('Platform moderation', 'Open reports', 'Personal updates have no community moderator, so their reports arrive here. Every decision is written to the platform audit log.') }}
+  <div class="report-list">
+    {% for item in reports %}
+      <article class="report-card">
+        <div class="report-card-meta">
+          <span>{{ item.report.target_type|title }} report</span>
+          <span>Reported by @{{ item.reporter.username if item.reporter else 'deleted user' }}</span>
+          <time datetime="{{ item.report.created_at.isoformat() }}">{{ item.report.created_at.strftime('%b %d, %Y · %H:%M') }}</time>
+        </div>
+        <h2>{{ item.post.title or (item.post.body[:80] if item.post else 'Update') }}</h2>
+        <p class="reported-context">{% if item.report.target_type == 'comment' %}{{ item.target.body[:240] }}{% else %}{{ item.post.body[:240] }}{% endif %}</p>
+        <p class="reported-context">Posted by @{{ item.author.username if item.author else 'deleted user' }} · audience {{ item.post.audience if item.post else 'unknown' }}</p>
+        <p class="report-reason"><strong>Reason</strong> {{ item.report.reason }}</p>
+        {% if item.post %}<a class="thread-link" href="/posts/{{ item.post.id }}">Review update →</a>{% endif %}
+        <div class="report-decisions">
+          <form method="post" action="/moderation/reports/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="dismiss">
+            <button class="button button-quiet" type="submit">Dismiss report</button>
+          </form>
+          <form method="post" action="/moderation/reports/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="remove">
+            <button class="button button-primary" type="submit">Remove content</button>
+          </form>
+          <form method="post" action="/moderation/reports/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="lock">
+            <button class="button button-quiet" type="submit">Lock comments</button>
+          </form>
+          <form method="post" action="/moderation/reports/{{ item.report.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="suspend">
+            <button class="button button-quiet danger-button" type="submit">Suspend author</button>
+          </form>
+        </div>
+      </article>
+    {% else %}
+      <p class="empty-state">No open reports.</p>
+    {% endfor %}
+  </div>
+
+  <header class="section-heading"><div><p class="eyebrow">A second look</p><h2>Appeals awaiting review</h2></div></header>
+  <div class="report-list">
+    {% for item in appeals %}
+      <article class="report-card">
+        <div class="report-card-meta">
+          <span>Appeal</span>
+          <span>From @{{ item.author.username if item.author else 'deleted user' }}</span>
+          <time datetime="{{ item.appeal.created_at.isoformat() }}">{{ item.appeal.created_at.strftime('%b %d, %Y · %H:%M') }}</time>
+        </div>
+        <h2>{{ item.post.title if item.post and item.post.title else 'Removed update' }}</h2>
+        <p class="report-reason"><strong>Reason</strong> {{ item.appeal.reason }}</p>
+        {% if item.report %}<p class="reported-context">The removal answered a report: {{ item.report.reason }}</p>{% endif %}
+        <div class="report-decisions">
+          <form method="post" action="/moderation/appeals/{{ item.appeal.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="deny">
+            <button class="button button-quiet" type="submit">Deny appeal</button>
+          </form>
+          <form method="post" action="/moderation/appeals/{{ item.appeal.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="grant">
+            <button class="button button-primary" type="submit">Restore content</button>
+          </form>
+        </div>
+      </article>
+    {% else %}
+      <p class="empty-state">No open appeals.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

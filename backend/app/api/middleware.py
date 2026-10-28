@@ -7,7 +7,10 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.api.deps import client_key
+from app.api.responses import render
 from app.core.config import get_settings
 from app.core.metrics import http_request_duration, http_requests, route_label, status_class
 from app.core.observability import REQUEST_ID_HEADER, request_id_var, resolve_request_id
@@ -74,6 +77,8 @@ async def add_security_headers(request: Request, call_next):
     # gets the restrictive one. Only the call surface asks for the microphone.
     if "Permissions-Policy" not in response.headers:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if _is_private_path(request.url.path):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     # A route may set its own deliberate policy (attachment delivery serves stored media under
     # a narrower one); everything else gets the application policy for its route class.
     if "Content-Security-Policy" not in response.headers:
@@ -127,6 +132,28 @@ def htmx_navigation(request: Request, response: Response) -> Response:
 # Probes and scrapes run on a fixed interval, so they log at DEBUG instead of flooding the
 # request log with entries nobody reads.
 _QUIET_PATHS = {"/healthz", "/readyz", "/metrics"}
+
+# Everything behind the sign-in wall. A crawler that reaches one of these is told, in the answer
+# itself, that the page is not a search result: the 303 to `/login` says only where to go next,
+# and a search engine is free to read that as "this address now lives at the sign-in page".
+_PRIVATE_PREFIXES = (
+    "/dashboard",
+    "/updates",
+    "/conversations",
+    "/notifications",
+    "/people",
+    "/account",
+    "/calls",
+    "/attachments",
+    "/posts/new",
+    "/communities/new",
+    "/moderation",
+)
+
+
+def _is_private_path(path: str) -> bool:
+    """A moderation queue is the one walled page that hangs off a public prefix."""
+    return path.startswith(_PRIVATE_PREFIXES) or path.endswith("/reports")
 
 
 def log_request(request: Request, request_id: str, status_code: int, started: float) -> None:
@@ -204,9 +231,38 @@ async def scope_violation_response(request: Request, exc: Exception) -> JSONResp
     )
 
 
+async def not_found_response(request: Request, exc: Exception) -> Response:
+    """Answer a missing page in the application shell when a browser asked for a page.
+
+    FastAPI's JSON body is right for a caller that parses it and wrong for everyone else: a
+    reader gets a raw object instead of a page, and a crawler is told this address is not an
+    HTML document. A navigation keeps the shell and the 404 status; anything else keeps JSON.
+    """
+    status_code = getattr(exc, "status_code", 500)
+    detail = getattr(exc, "detail", "Not found.")
+    request_id = getattr(request.state, "request_id", None) or "-"
+    headers = dict(getattr(exc, "headers", None) or {})
+    headers[REQUEST_ID_HEADER] = request_id
+    is_page_navigation = (
+        status_code == 404
+        and request.method in {"GET", "HEAD"}
+        and "text/html" in request.headers.get("accept", "")
+    )
+    if not is_page_navigation:
+        return JSONResponse(
+            {"detail": detail, "request_id": request_id},
+            status_code=status_code,
+            headers=headers,
+        )
+    response = render(request, "errors/404.html", {"user": None}, status_code=404)
+    response.headers.update(headers)
+    return response
+
+
 def register_middleware(app: FastAPI) -> None:
     """Register middleware so the request context wraps the security headers, then the 500 handler."""
     app.middleware("http")(add_security_headers)
     app.middleware("http")(add_request_context)
+    app.add_exception_handler(StarletteHTTPException, not_found_response)
     app.add_exception_handler(ScopeViolation, scope_violation_response)
     app.add_exception_handler(Exception, unhandled_error_response)

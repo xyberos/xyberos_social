@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/auth_layout.html" import auth_layout %}
-{% block title %}Sign in | X-Social{% endblock %}
+{% block title %}Sign in | Social+{% endblock %}
+{% block description %}Sign in to Social+ to pick up your communities, conversations, and the people you follow — at your own pace.{% endblock %}
 {% block content %}
 {% call auth_layout(
   {'eyebrow': 'Welcome back', 'title': 'Your people,', 'emphasis': 'your pace.',

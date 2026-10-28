@@ -2,6 +2,7 @@
 {% from "partials/post_media.html" import show_post_media %}
 {% from "partials/avatar.html" import avatar %}
 {% block title %}{{ person.display_name }} | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="directory-layout">
   <a class="back-link" href="/people">← People</a>

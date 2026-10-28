@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
-{% block title %}New group | X-Social{% endblock %}
+{% block title %}New group | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="profile-layout conversation-create-layout">
   {{ page_heading('Bring people together', 'Start a group chat.', 'Group messages are shared with everyone who joins this conversation.') }}

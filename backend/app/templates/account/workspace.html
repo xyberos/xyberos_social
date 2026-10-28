@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/post_media.html" import show_post_media %}
-{% block title %}Workspace | X-Social{% endblock %}
+{% block title %}Workspace | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="workspace-layout">
   {% call page_heading('Your account', 'Workspace', 'Everything you have published, newest first. Open it, or withdraw it when you are done with it.') %}
@@ -50,6 +51,7 @@
                   <option value="only_me" {% if post.audience == 'only_me' %}selected{% endif %}>Only me</option>
                   <option value="followers" {% if post.audience == 'followers' %}selected{% endif %}>Followers</option>
                   <option value="everyone" {% if post.audience == 'everyone' %}selected{% endif %}>Everyone</option>
+                  <option value="public" {% if post.audience == 'public' %}selected{% endif %}>Anyone on the web</option>
                 </select>
                 <button class="text-button" type="submit">Change</button>
               </form>

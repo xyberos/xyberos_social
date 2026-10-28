@@ -10,12 +10,13 @@ a time.
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 
 from conftest import create_account, csrf_from
 from test_attachments import FakeStorage, noisy_png_bytes, png_bytes
 
 from app.core.config import Settings
-from app.models import Attachment
+from app.models import Attachment, User
 
 
 def mp4_bytes() -> bytes:
@@ -281,6 +282,56 @@ def test_the_read_rule_of_the_post_governs_its_media(client_factory, storage):
     # And the same answer as an id that never existed.
     assert outsider.get("/attachments/00000000-0000-0000-0000-000000000000/download").status_code == 404
     assert alice.get(published.headers["location"]).status_code == 200
+
+
+def test_public_media_is_readable_without_an_account(client_factory, storage):
+    alice = client_factory()
+    anonymous = client_factory()
+    assert create_account(alice, "alice@example.com", "alice").status_code == 303
+
+    media = upload(alice, storage, png_bytes())
+    published = publish(alice, body="For the web", audience="public", attachment_ids=[media["id"]])
+    assert published.status_code == 303
+    assert anonymous.get(published.headers["location"]).status_code == 200
+    assert anonymous.get(media["download_url"]).status_code == 200
+    if media.get("thumbnail_url"):
+        assert anonymous.get(media["thumbnail_url"]).status_code == 200
+
+    # Narrowing the audience closes the bytes with it: the file follows the post, not a URL.
+    post_id = published.headers["location"].rsplit("/", 1)[-1]
+    workspace = alice.get("/workspace")
+    assert (
+        alice.post(
+            f"/posts/{post_id}/audience",
+            data={
+                "csrf_token": csrf_from(workspace.text),
+                "audience": "everyone",
+                "return_to": "/workspace",
+            },
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    assert anonymous.get(media["download_url"]).status_code == 404
+
+
+def test_a_deactivated_author_takes_the_media_with_it(client_factory, database_factory, storage):
+    alice = client_factory()
+    anonymous = client_factory()
+    assert create_account(alice, "alice@example.com", "alice").status_code == 303
+
+    media = upload(alice, storage, png_bytes())
+    published = publish(alice, body="For the web", audience="public", attachment_ids=[media["id"]])
+    assert published.status_code == 303
+    assert anonymous.get(media["download_url"]).status_code == 200
+
+    # The page already refuses a deactivated account; its bytes must not outlive that verdict.
+    with database_factory() as database:
+        database.scalar(select(User).where(User.username == "alice")).is_active = False
+        database.commit()
+
+    assert anonymous.get(published.headers["location"]).status_code == 404
+    assert anonymous.get(media["download_url"]).status_code == 404
 
 
 def test_a_block_closes_the_media_too(client_factory, storage):

@@ -29,11 +29,12 @@
           <select id="{{ field_prefix }}-audience" name="audience" aria-describedby="{{ field_prefix }}-audience-help">
             <option value="followers" selected>Your followers</option>
             <option value="only_me">Only me</option>
-            <option value="everyone">Everyone on X-Social</option>
+            <option value="everyone">Everyone on Social+</option>
+            <option value="public">Anyone on the web</option>
           </select>
           <span class="material-symbols-rounded composer-chevron" aria-hidden="true">expand_more</span>
         </label>
-        <p class="visually-hidden" id="{{ field_prefix }}-audience-help">Followers read it on their dashboard. Everyone can also open it from your page under People. Only me keeps it between here and your workspace.</p>
+        <p class="visually-hidden" id="{{ field_prefix }}-audience-help">Followers read it on their dashboard. Everyone on Social+ can also open it from your page under People. Anyone on the web, signed in or not, can read a public update. Only me keeps it between here and your workspace.</p>
       </div>
     </header>
 

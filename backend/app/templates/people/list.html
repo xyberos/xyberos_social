@@ -2,6 +2,7 @@
 {% from "partials/avatar.html" import avatar %}
 {% from "partials/page_heading.html" import page_heading %}
 {% block title %}People | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="directory-layout">
   {{ page_heading('Your social graph', 'People', 'Choose who to follow. Blocking removes follows in both directions.') }}

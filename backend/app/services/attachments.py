@@ -632,23 +632,32 @@ def _store_thumbnail(attachment: Attachment, payload: bytes) -> None:
     attachment.thumbnail_key = key
 
 
-def _require_post_media_read(database: Session, attachment: Attachment, user: User) -> None:
+def _require_post_media_read(
+    database: Session, attachment: Attachment, user: User | None
+) -> None:
     """Authorize a post's media by the read rule of the post it belongs to.
 
-    A removed post keeps its place but not its files: the row still names them, and nobody —
-    not even the author — downloads them afterwards, so the reason a post is gone stays gone.
+    The reader may be nobody at all: a post its author opened to the web carries media the web
+    may fetch, and that is the only way an anonymous reader reaches bytes. A removed post keeps
+    its place but not its files: the row still names them, and nobody — not even the author —
+    downloads them afterwards, so the reason a post is gone stays gone.
     """
     post = database.get(Post, attachment.post_id)
     if post is None or post.removed_at is not None:
         raise HTTPException(status_code=404, detail="Attachment not found.")
+    # The page rule and the bytes rule state the same boundary: a deactivated account keeps
+    # its rows but not its audience, so nothing it published stays downloadable either.
+    author = database.get(User, post.author_id)
+    if author is None or not author.is_active:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
     if post.community_id is not None:
-        if is_blocked_between(database, user.id, post.author_id):
+        if user is not None and is_blocked_between(database, user.id, post.author_id):
             raise HTTPException(status_code=404, detail="Attachment not found.")
         community = database.get(Community, post.community_id)
         if community is None:
             raise HTTPException(status_code=404, detail="Attachment not found.")
         if community.visibility == "private" and (
-            community_role(database, community.id, user.id) is None
+            user is None or community_role(database, community.id, user.id) is None
         ):
             raise HTTPException(status_code=404, detail="Attachment not found.")
         return
@@ -656,8 +665,16 @@ def _require_post_media_read(database: Session, attachment: Attachment, user: Us
         raise HTTPException(status_code=404, detail="Attachment not found.")
 
 
-def attachment_for_download(database: Session, *, attachment_id: UUID, user: User) -> Attachment:
-    """Fail closed on every condition: unknown scope, missing membership, block, or no verdict."""
+def attachment_for_download(
+    database: Session, *, attachment_id: UUID, user: User | None
+) -> Attachment:
+    """Fail closed on every condition: unknown scope, missing membership, block, or no verdict.
+
+    `user` is optional only because public post media is readable without an account. Every
+    other scope — a conversation, a draft, a personal update the author kept narrower — still
+    requires the identity it names, and an anonymous reader who asks for one of those gets the
+    same 404 an id that never existed returns.
+    """
     attachment = database.get(Attachment, attachment_id)
     if attachment is None or attachment.deleted_at is not None or attachment.scan_state != SCANNED:
         raise HTTPException(status_code=404, detail="Attachment not found.")
@@ -665,6 +682,8 @@ def attachment_for_download(database: Session, *, attachment_id: UUID, user: Use
         _require_post_media_read(database, attachment, user)
         return attachment
     if attachment.scope_type == CONVERSATION:
+        if user is None:
+            raise HTTPException(status_code=404, detail="Attachment not found.")
         membership = database.get(ConversationMember, (attachment.scope_id, user.id))
         if membership is None or membership.left_at is not None:
             raise HTTPException(status_code=404, detail="Attachment not found.")
@@ -673,7 +692,7 @@ def attachment_for_download(database: Session, *, attachment_id: UUID, user: Use
         return attachment
     # An upload that is still its author's draft is theirs alone; nothing else is reachable
     # by scope, so an unrecognised scope stays a 404 rather than an open door.
-    if attachment.owner_user_id == user.id:
+    if user is not None and attachment.owner_user_id == user.id:
         return attachment
     raise HTTPException(status_code=404, detail="Attachment not found.")
 

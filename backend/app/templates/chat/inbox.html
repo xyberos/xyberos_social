@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/avatar.html" import avatar %}
-{% block title %}Inbox | X-Social{% endblock %}
+{% block title %}Inbox | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="inbox-layout">
   {% call page_heading('Your conversations', 'Inbox', none) %}

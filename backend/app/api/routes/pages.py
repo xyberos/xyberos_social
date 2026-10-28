@@ -75,7 +75,7 @@ def dashboard_page(
         source_conditions.append(
             and_(
                 or_(Post.author_id.in_(followed_authors), Post.author_id == user.id),
-                or_(Post.author_id == user.id, Post.audience.in_(("followers", "everyone"))),
+                or_(Post.author_id == user.id, Post.audience.in_(("followers", "everyone", "public"))),
             )
         )
         # A personal update has no community to gate on: the author's followers are its

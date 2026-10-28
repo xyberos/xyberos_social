@@ -155,6 +155,45 @@ Record: how many, which endpoint, and the root cause.
    previous version cannot run against it, using `alembic downgrade -1`.
 4. Watch `/readyz` and the error-rate alert for ten minutes after the switch.
 
+## Granting or revoking the platform moderator role
+
+Personal updates have no community moderator, so their reports go to `/moderation`, and only
+`users.is_moderator` opens it. Nothing in the application grants the flag — deliberately, so no
+account can promote itself or another. An operator with database access sets it:
+
+```sql
+-- Grant. Every page load reads the flag, so the role is live on the next request.
+UPDATE users SET is_moderator = true WHERE username = 'the-operator-account';
+
+-- Revoke.
+UPDATE users SET is_moderator = false WHERE username = 'the-operator-account';
+```
+
+Grant it to a named human, not a shared account: `platform_audit_events.actor_user_id` is what
+makes a removal or suspension attributable. Check the current holders with:
+
+```sql
+SELECT username, display_name, is_active FROM users WHERE is_moderator ORDER BY username;
+```
+
+## Reinstating a suspended account
+
+A moderator can end an account from the report queue, and the queue deliberately cannot reverse
+that. Reinstatement is an operator decision, made after reviewing the audit trail:
+
+```sql
+SELECT created_at, action, actor_user_id, target_id, reason
+FROM platform_audit_events
+WHERE action = 'account.suspended' AND target_id = '<user-id>'
+ORDER BY created_at DESC;
+
+UPDATE users SET is_active = true WHERE id = '<user-id>';
+```
+
+Sessions were not deleted when the account was suspended, and `authenticated_user` refuses an
+inactive account, so old cookies stop working; after reinstatement the account can sign in again
+with its existing password. The suspension record stays in the audit log either way.
+
 ## Roles to assign before the pilot
 
 The plan's exit criteria for this phase require named owners. Fill these in before inviting

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/avatar.html" import avatar %}
-{% block title %}Your profile | X-Social{% endblock %}
+{% block title %}Your profile | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="profile-layout">
   {{ page_heading('Account / Profile', 'Your corner of Social+.', 'Keep the details that help your people recognize you.') }}

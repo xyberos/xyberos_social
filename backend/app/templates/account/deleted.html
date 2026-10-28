@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
-{% block title %}Account deleted | X-Social{% endblock %}
+{% block title %}Account deleted | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="account-deleted-layout">
   {{ page_heading('Account / Complete', 'Your account has been deleted.', 'Sign-in details and profile information have been removed. Shared posts, comments, and conversation history remain with “Deleted account” attribution. Backups may retain older copies until the operator’s backup-retention period expires.') }}

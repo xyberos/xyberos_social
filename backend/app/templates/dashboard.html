@@ -3,6 +3,7 @@
 {% from "partials/post_media.html" import show_post_media %}
 {% from "partials/avatar.html" import avatar %}
 {% block title %}Dashboard | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="dashboard-layout">
    {{ page_heading('Your dashboard', 'Dashboard') }} 

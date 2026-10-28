@@ -16,6 +16,7 @@ MAX_EVENT_NAME_LENGTH = 64
 # Identity and account lifecycle.
 ACCOUNT_DELETED = "account.deleted"
 ACCOUNT_PROFILE_CHANGED = "account.profile.changed"
+ACCOUNT_SUSPENDED = "account.suspended"
 SOCIAL_RELATIONSHIP_CHANGED = "social.relationship.changed"
 
 # Communities and their membership.
@@ -39,6 +40,12 @@ COMMENT_REPORTED = "comment.reported"
 REPORT_RESOLVED = "report.resolved"
 REPORT_DISMISSED = "report.dismissed"
 
+# Appeals. A removal the platform queue decided can be questioned by its author, and the
+# outcome is an event like any other moderation decision.
+MODERATION_APPEAL_FILED = "moderation.appeal.filed"
+MODERATION_APPEAL_GRANTED = "moderation.appeal.granted"
+MODERATION_APPEAL_DENIED = "moderation.appeal.denied"
+
 # Conversations and messages.
 CONVERSATION_CREATED = "conversation.created"
 CONVERSATION_MEMBER_ADDED = "conversation.member.added"
@@ -54,6 +61,7 @@ CALL_ENDED = "call.ended"
 SOCIAL_EVENTS = (
     ACCOUNT_DELETED,
     ACCOUNT_PROFILE_CHANGED,
+    ACCOUNT_SUSPENDED,
     SOCIAL_RELATIONSHIP_CHANGED,
     COMMUNITY_CREATED,
     COMMUNITY_DELETED,
@@ -72,6 +80,9 @@ SOCIAL_EVENTS = (
     COMMENT_REPORTED,
     REPORT_RESOLVED,
     REPORT_DISMISSED,
+    MODERATION_APPEAL_FILED,
+    MODERATION_APPEAL_GRANTED,
+    MODERATION_APPEAL_DENIED,
     CONVERSATION_CREATED,
     CONVERSATION_MEMBER_ADDED,
     CONVERSATION_MEMBER_REMOVED,

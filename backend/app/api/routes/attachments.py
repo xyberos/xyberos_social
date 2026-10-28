@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import authenticated_form_user, authenticated_user
+from app.api.deps import authenticated_form_user, authenticated_user, client_key
 from app.core.database import get_db
 from app.core.media import THUMBNAIL_MIME
 from app.core.scoping import conversation_scope
@@ -50,6 +50,17 @@ def _signed_in(request: Request, database: Session) -> User:
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     return user
+
+
+def _download_key(request: Request, user: User | None) -> str:
+    """A signed-in reader is limited by account; a reader of public media by address.
+
+    Media on a post the author opened to the web is readable without a session, so the limit
+    has to name the one thing an anonymous reader does have — where the request came from.
+    """
+    if user is not None:
+        return f"attachment:{user.id}"
+    return f"attachment:anonymous:{client_key(request)}"
 
 
 def _etag_matches(header: str, etag: str) -> bool:
@@ -165,9 +176,9 @@ def download_attachment(
     asks for one part of it at a time. Ranges are answered from the size this pipeline
     recorded at finalize, so a reader cannot ask for bytes past what was verified.
     """
-    user = _signed_in(request, database)
+    user = authenticated_user(request, database)
     if not check_rate_limit(
-        f"attachment:{user.id}", "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
+        _download_key(request, user), "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
     ):
         raise HTTPException(status_code=429, detail="Too many downloads. Try again in a moment.")
     attachment = attachment_service.attachment_for_download(
@@ -254,9 +265,9 @@ def download_thumbnail(
     page of media from costing a page of originals. The original is still what a reader
     downloads, and still what releases the stored copy.
     """
-    user = _signed_in(request, database)
+    user = authenticated_user(request, database)
     if not check_rate_limit(
-        f"attachment:{user.id}", "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
+        _download_key(request, user), "download", limit=DOWNLOAD_LIMIT, seconds=RATE_WINDOW_SECONDS
     ):
         raise HTTPException(status_code=429, detail="Too many downloads. Try again in a moment.")
     attachment = attachment_service.attachment_for_download(

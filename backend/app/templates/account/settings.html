@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
-{% block title %}Settings | X-Social{% endblock %}
+{% block title %}Settings | Social+{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
 <section class="settings-layout">
   {% call page_heading('Account / Preferences', 'Settings', 'Choose what you see and what reaches your inbox.') %}

@@ -86,15 +86,20 @@ def is_following(database: Session, follower_id, author_id) -> bool:
 def can_read_personal_post(database: Session, viewer: User | None, post: Post) -> bool:
     """The per-row audience rule: the author, and then whoever the audience names.
 
-    A block is absolute, so it hides an `everyone` post too; that is why the block is settled
-    before the audience is consulted. `visible_personal_posts_condition` states the same rule
-    as one SQL predicate for a page that lists a whole profile.
+    `public` is the only value a reader without an account can satisfy, and it is settled
+    before the viewer is required precisely because the open web has no identity to consult.
+    A block is absolute wherever an identity exists, so it still hides a public update from the
+    person the author blocked; an anonymous reader is nobody's blocked pair.
+    `visible_personal_posts_condition` states the same rule as one SQL predicate for a page
+    that lists a whole profile.
     """
-    if viewer is None:
-        return False
-    if viewer.id == post.author_id:
+    if viewer is not None and viewer.id == post.author_id:
         return True
-    if is_blocked_between(database, viewer.id, post.author_id):
+    if viewer is not None and is_blocked_between(database, viewer.id, post.author_id):
+        return False
+    if post.audience == "public":
+        return True
+    if viewer is None:
         return False
     if post.audience == "everyone":
         return True
@@ -105,11 +110,14 @@ def visible_personal_posts_condition(database: Session, viewer: User | None, aut
     """`can_read_personal_post` as a predicate, asked once for a whole profile page."""
     if viewer is not None and viewer.id == author_id:
         return true()
-    if viewer is None or is_blocked_between(database, viewer.id, author_id):
+    if viewer is not None and is_blocked_between(database, viewer.id, author_id):
         return false()
+    if viewer is None:
+        # A signed-out reader sees exactly what the author opened to the web.
+        return Post.audience == "public"
     if is_following(database, viewer.id, author_id):
-        return Post.audience.in_(("followers", "everyone"))
-    return Post.audience == "everyone"
+        return Post.audience.in_(("followers", "everyone", "public"))
+    return Post.audience.in_(("everyone", "public"))
 
 
 def find_personal_post(database: Session, post_id: UUID, user: User | None) -> Post:
@@ -120,6 +128,12 @@ def find_personal_post(database: Session, post_id: UUID, user: User | None) -> P
     """
     post = database.get(Post, post_id)
     if post is None or post.community_id is not None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    # A deleted account keeps its rows but not its audience. Deletion deactivates the account
+    # and erases who it was, so nothing it published may stay readable afterwards — least of
+    # all on the open web.
+    author = database.get(User, post.author_id)
+    if author is None or not author.is_active:
         raise HTTPException(status_code=404, detail="Post not found.")
     if not can_read_personal_post(database, user, post):
         raise HTTPException(status_code=404, detail="Post not found.")
@@ -140,3 +154,15 @@ def require_community_manager(
             status_code=403, detail="You do not have permission to manage this community."
         )
     return role
+
+
+def require_platform_moderator(user: User) -> None:
+    """The platform queue is a role, and the role is granted outside the application.
+
+    Personal updates have no community owner to appeal to, so the queue that answers a report
+    about one is platform-wide. Nothing here makes the caller one; an operator sets the flag.
+    """
+    if not user.is_moderator:
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to moderate."
+        )

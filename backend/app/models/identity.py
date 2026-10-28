@@ -50,6 +50,10 @@ class User(Base):
     bio: Mapped[str] = mapped_column(Text, default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # A platform role, not a community one: it unlocks the queue for personal updates, which
+    # have no community to moderate them. An operator grants it; nothing in the application
+    # grants it to itself.
+    is_moderator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     quiet_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notify_replies: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notify_moderation: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

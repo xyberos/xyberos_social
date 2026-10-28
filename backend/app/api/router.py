@@ -16,12 +16,14 @@ from app.api.routes import (
     pages,
     people,
     post_media,
+    seo,
 )
 
 api_router = APIRouter()
 
 for route_module in (
     health,
+    seo,
     pages,
     identity,
     people,

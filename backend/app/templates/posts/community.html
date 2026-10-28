@@ -3,6 +3,31 @@
 {% from "partials/comments_section.html" import show_comments %}
 {% set comments_base = '/communities/' ~ community.slug ~ '/posts/' ~ post.id ~ '/comments' %}
 {% block title %}{{ post.title }} | {{ community.name }} | Social+{% endblock %}
+{% block description %}{{ describe(post.body, post.title ~ ' — a discussion in ' ~ community.name ~ ' on Social+.') }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block structured_data %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "DiscussionForumPosting",
+      "headline": {{ post.title|tojson }},
+      "text": {{ describe(post.body, post.title, 500)|tojson }},
+      "url": {{ canonical_url|tojson }},
+      "mainEntityOfPage": {{ canonical_url|tojson }},
+      "datePublished": {{ post.created_at.isoformat()|tojson }},
+      "author": {
+        "@type": "Person",
+        "name": {{ author.display_name|tojson }},
+        "url": {{ (site_url ~ '/people/' ~ author.id)|tojson }}
+      },
+      "isPartOf": {
+        "@type": "DiscussionForum",
+        "name": {{ community.name|tojson }},
+        "url": {{ (site_url ~ '/communities/' ~ community.slug)|tojson }}
+      }
+    }
+  </script>
+{% endblock %}
 {% block content %}
 <section class="thread-layout">
   <a class="back-link" href="/communities/{{ community.slug }}">← {{ community.name }}</a>

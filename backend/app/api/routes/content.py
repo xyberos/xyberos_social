@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from app.api.deps import (
     allow_request,
@@ -32,6 +32,7 @@ from app.services.authorization import (
 )
 from app.services.comments import comment_tree
 from app.services.communities import add_moderation_event
+from app.services.moderation import appeal_for, platform_removal_report
 from app.services.notifications import queue_notification
 from app.services.outbox import enqueue_event
 from app.services import attachments as attachment_service
@@ -425,6 +426,38 @@ def personal_post_detail(
     post = find_personal_post(database, post_id, user)
     hidden_author_ids = blocked_user_ids(database, user.id) if user else set()
     browser_session = current_session(request, database) if user else None
+    # Only the author may question a removal, and only a removal this platform queue decided:
+    # a withdrawal of one's own, or a community moderator's decision, has nothing to appeal to.
+    appeal = None
+    appealable = False
+    if user is not None and post.removed_at is not None and user.id == post.author_id:
+        if platform_removal_report(database, "post", post.id) is not None:
+            appeal = appeal_for(database, "post", post.id, user.id)
+            appealable = appeal is None
+    reported = set()
+    if user is not None:
+        # The forms the reader has already used, so the page says "Reported" instead of
+        # offering the same report twice.
+        reported = set(
+            database.execute(
+                select(ContentReport.target_type, ContentReport.target_id).where(
+                    ContentReport.reporter_id == user.id,
+                    ContentReport.community_id.is_(None),
+                    or_(
+                        and_(
+                            ContentReport.target_type == "post",
+                            ContentReport.target_id == post.id,
+                        ),
+                        and_(
+                            ContentReport.target_type == "comment",
+                            ContentReport.target_id.in_(
+                                select(Comment.id).where(Comment.post_id == post.id)
+                            ),
+                        ),
+                    ),
+                )
+            ).all()
+        )
     return render(
         request,
         "posts/personal.html",
@@ -438,6 +471,9 @@ def personal_post_detail(
             ],
             "comments": comment_tree(database, post.id, hidden_author_ids),
             "csrf_token": browser_session.csrf_token if browser_session else None,
+            "reported": reported,
+            "appeal": appeal,
+            "appealable": appealable,
             "error": request.query_params.get("error"),
         },
     )
@@ -517,6 +553,8 @@ def create_personal_comment(
     post = find_personal_post(database, post_id, user)
     if post.removed_at is not None:
         raise HTTPException(status_code=404, detail="Post not found.")
+    if post.is_locked:
+        raise HTTPException(status_code=409, detail="This discussion is locked.")
     body = body.strip()
     if not allow_request(request, "create-comment"):
         return RedirectResponse(f"/posts/{post.id}?error=slow-down", status_code=303)

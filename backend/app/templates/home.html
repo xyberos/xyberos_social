@@ -1,6 +1,30 @@
 {% extends "base.html" %} 
 
-{% block title %}Social+ | Social, at your pace{% endblock %} 
+{% block title %}Social+ | A calmer social network for communities{% endblock %}
+{% block description %}Social+ is a calmer social network built around the people and communities you choose: a finite feed, private messaging, and shared spaces, on your terms.{% endblock %}
+{% block structured_data %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": {{ (site_url ~ '/#website')|tojson }},
+          "url": {{ site_url|tojson }},
+          "name": {{ site_name|tojson }},
+          "description": {{ seo_description|tojson }},
+          "inLanguage": "en"
+        },
+        {
+          "@type": "Organization",
+          "@id": {{ (site_url ~ '/#organization')|tojson }},
+          "name": {{ site_name|tojson }},
+          "url": {{ site_url|tojson }}
+        }
+      ]
+    }
+  </script>
+{% endblock %} 
 
 {% block content %} 
 <section class="home-layout"> 
