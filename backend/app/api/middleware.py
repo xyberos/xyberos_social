@@ -43,11 +43,13 @@ def _app_csp(endpoint_url: str | None) -> str:
     if origin:
         connect_sources.append(origin)
     return (
+        # HTMX is still the one third-party script; the fonts are served from this origin, so
+        # `font-src` and `style-src` no longer name a Google host.
         "default-src 'self'; script-src 'self' https://unpkg.com; "
-        "style-src 'self' https://fonts.googleapis.com; "
+        "style-src 'self'; "
         # blob: lets a delivered attachment render from the reader's own local copy after the
         # stored object is released.
-        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; "
+        "font-src 'self'; img-src 'self' data: blob:; "
         # A post's bytes are served from this origin; blob: covers the composer's preview of
         # a file that is still uploading, and the chat's local copy of a received one.
         "media-src 'self' blob:; object-src 'none'; "

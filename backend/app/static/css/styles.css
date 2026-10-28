@@ -8,6 +8,29 @@
 
    An explicit choice arrives as `data-theme` on <html>; "system" leaves the attribute off and
    the media query below selects dark tokens. Keep the two dark blocks identical. */
+
+/* The two faces are served from this origin: a third-party stylesheet on the critical path costs
+   a DNS lookup, a TCP and TLS handshake, and a request the browser cannot start until that sheet
+   arrives. The icon font is subset to the 56 glyphs the templates and scripts name — the
+   published file carries all 6,660 — which is the difference between 1.4 MB and 24 KB. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("/static/fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Material Symbols Rounded";
+  font-style: normal;
+  /* The outline and the filled variant are one file: FILL is a variation axis, not a second
+     face, and it is what a selected tab asks for. */
+  font-weight: 300;
+  font-display: block;
+  src: url("/static/fonts/material-symbols-rounded.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light;
 

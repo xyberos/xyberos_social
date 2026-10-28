@@ -32,6 +32,25 @@ The same server-rendered pages serve a phone; there is no second client and no s
 - **Viewport units.** `100dvh` with a `100vh` fallback everywhere a full-height box is measured, because `100vh` is taller than the visible viewport while a mobile URL bar is expanded.
 - **Touch targets.** Tab items are 44px or taller, and `@media (pointer: coarse)` raises every text button — Block, Remove, Report — to 44px, since those are both the smallest and the most consequential controls. `touch-action: manipulation` removes the double-tap delay.
 - **Installable.** `/manifest.webmanifest` is served from a route rather than a static file, because `StaticFiles` guesses the content type from the extension and a manifest with the wrong type is ignored. It names a 192px and a 512px icon plus a maskable 512px one, and `theme-color` follows the light and dark scheme so browser chrome matches the page.
+- **Both faces are self-hosted.** `/static/fonts/inter-latin.woff2` (48 KB) and a subset of Material Symbols Rounded (24 KB) are preloaded from this origin, so no third-party stylesheet sits on the critical path and `font-src`/`style-src` name no external host. The published icon font carries 6,660 glyphs and weighs 1.4 MB; the subset carries the 58 the pages name.
+
+### Rebuilding the icon subset
+
+`static/fonts/icons.txt` is the list the subset was built from, and `static/fonts/material-symbols-rounded.woff2` contains only those glyphs. Adding an icon to a template **without** rebuilding does not fail a request — it prints the glyph's name where the picture belongs. `backend/tests/test_icon_subset.py` fails on the mismatch, in both directions, so the list and the pages cannot drift.
+
+The subsetter is a build tool, not a runtime dependency; install it outside the environment:
+
+```powershell
+python -m pip install --target .fontbuild/tools fonttools brotli
+$env:PYTHONPATH = ".fontbuild/tools"
+python -m fontTools.subset .fontbuild/symbols-rounded.woff2 `
+  --text="$(Get-Content backend/app/static/fonts/icons.txt -Raw)" `
+  --glyphs="<icon>,<icon>.fill,..." --layout-features=rlig,rclt,liga --no-layout-closure `
+  --unicodes=U+0020 --flavor=woff2 --with-zopfli --notdef-outline --recommended-glyphs `
+  --output-file=backend/app/static/fonts/material-symbols-rounded.woff2
+```
+
+Two details are load-bearing. `--no-layout-closure` is what keeps the subset small: without it the closure over the icon font's `rclt`/`rlig` lookups pulls in all 6,660 glyphs and the file grows to 1.2 MB. And each icon needs its `.fill` companion, because the filled variant is a variation axis (`FILL` 1) that a selected tab asks for — a subset without it draws the outline in the active tab.
 
 The shell is asserted in `backend/tests/test_mobile_shell.py`: the viewport flags, the manifest and its icons, five tab destinations with exactly one `aria-current`, and the CSS rules the layout depends on. A native client is still deferred — it needs a versioned JSON API first, which this phase does not have.
 
