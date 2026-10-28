@@ -10,6 +10,7 @@ from app.api.responses import render
 from app.core.database import get_db
 from app.models import Community, CommunityMembership, Post, User, UserRelationship
 from app.services import attachments as attachment_service
+from app.services import reactions as reaction_service
 from app.services.updates import decode_updates_cursor, encode_updates_cursor
 
 router = APIRouter()
@@ -142,6 +143,11 @@ def dashboard_page(
             "limit": limit,
             "posts": page_rows,
             "count": len(page_rows),
+            "reactions": reaction_service.summaries(
+                database,
+                [post.id for post, _author, _community in page_rows],
+                user.id,
+            ),
             "has_more": has_more,
             "next_cursor": next_cursor,
             "window_end": window_end,

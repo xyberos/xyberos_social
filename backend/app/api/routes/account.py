@@ -48,6 +48,7 @@ from app.models import (
 )
 from app.core.security import hash_password, new_token, verify_password
 from app.services import attachments as attachment_service
+from app.services import reactions as reaction_service
 from app.services.attachments import delete_attachments_for_owner
 from app.services.audit import record_audit
 from app.services.communities import delete_unowned_community, record_community_audit
@@ -113,6 +114,11 @@ def workspace_page(
             posts=posts,
             media=attachment_service.post_media_payloads(
                 database, [post.id for post, _community, _openable in posts if not post.removed_at]
+            ),
+            reactions=reaction_service.summaries(
+                database,
+                [post.id for post, _community, _openable in posts],
+                user.id,
             ),
             count=len(posts),
             total=workspace.count_posts(database, user.id, source),

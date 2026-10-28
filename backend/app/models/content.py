@@ -197,3 +197,29 @@ class ModerationAppeal(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class PostReaction(Base):
+    """One reader's verdict on one post: a like, a dislike, or nothing at all.
+
+    The pair is the primary key, so a reader cannot hold two verdicts on the same post and
+    switching is an update rather than a second row. Counts are derived from this table rather
+    than stored beside the post, so no counter can drift away from the rows that justify it.
+    """
+
+    __tablename__ = "post_reactions"
+    __table_args__ = (
+        CheckConstraint("kind IN ('like', 'dislike')", name="ck_reaction_kind"),
+        Index("ix_reactions_post_kind", "post_id", "kind"),
+    )
+
+    post_id: Mapped[UUID] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

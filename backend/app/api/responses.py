@@ -75,6 +75,11 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
             "site_url": site_url(),
             "canonical_url": canonical_url(request),
             "seo_description": DEFAULT_DESCRIPTION,
+            # The address a form on this page returns to, so a control in a list can say where
+            # it came from without every template reaching for `request` itself.
+            "current_url": f"{request.url.path}?{request.url.query}"
+            if request.url.query
+            else request.url.path,
             **context,
             **_shell_context(request, context),
             **_theme_context(request, context),

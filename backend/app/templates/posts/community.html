@@ -36,7 +36,7 @@
   {% if error == 'slow-down' %}<p class="alert" role="alert">You’re replying too quickly. Try again in a moment.</p>{% endif %}
   {% if error == 'invalid-comment' %}<p class="alert" role="alert">Comments must contain 1–5,000 characters.</p>{% endif %}
 
-  {% call show_post_card(post, author, community, none) %}
+  {% call show_post_card(post, author, community, none, none, reactions, csrf_token, current_url) %}
     <div class="thread-actions">
       {% if user and not post.removed_at and user.id != post.author_id and ('post', post.id) not in reported %}
         <details class="report-details"><summary>Report post</summary>

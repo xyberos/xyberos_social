@@ -19,6 +19,7 @@ from app.services.authorization import (
     is_blocked_between,
     require_community_manager,
 )
+from app.services import reactions as reaction_service
 from app.services.communities import record_community_audit
 
 router = APIRouter()
@@ -193,6 +194,9 @@ def community_detail(
             "members": members,
             "posts": posts,
             "events": events,
+            "reactions": reaction_service.summaries(
+                database, [post.id for post, _author in posts], user.id if user else None
+            ),
             "csrf_token": browser_session.csrf_token if browser_session else None,
         },
     )

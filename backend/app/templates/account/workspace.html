@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/reactions.html" import show_reactions %}
 {% block title %}Workspace | Social+{% endblock %}
 {% block robots %}noindex, nofollow{% endblock %}
 {% block content %}
@@ -40,6 +41,7 @@
           </h2>
           {% if post.title and post.body %}<p class="workspace-excerpt">{{ post.body[:140] }}{% if post.body|length > 140 %}…{% endif %}</p>{% endif %}
           {{ show_post_media(post_media) }}
+          {{ show_reactions(post, community, reactions, csrf_token, current_url) }}
           <div class="workspace-row-actions">
             {% if openable %}<a class="text-button" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>Open</a>{% endif %}
             {% if not community and not post.removed_at %}

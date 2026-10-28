@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "partials/page_heading.html" import page_heading %}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/reactions.html" import show_reactions %}
 {% from "partials/avatar.html" import avatar %}
 {% block title %}Dashboard | Social+{% endblock %}
 {% block robots %}noindex, nofollow{% endblock %}
@@ -60,6 +61,7 @@
             {{ show_post_media(post_media) }}
           {% endif %}
           <div class="post-actions">
+            {{ show_reactions(post, community, reactions, csrf_token, current_url) }}
             <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comment</a>
             <a class="post-action" href="{{ post_url }}"><span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>Open</a>
           </div>

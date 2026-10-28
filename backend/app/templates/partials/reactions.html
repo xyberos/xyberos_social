@@ -1,0 +1,29 @@
+{# A reader's verdict on a post: two forms, so the control works without JavaScript and each
+   one carries the same CSRF token every other form on the page uses. A second click on the
+   chosen verdict withdraws it; the other verdict replaces it. A signed-out reader sees the
+   counts and no buttons, which is also what a crawler sees on a public post. #}
+{% macro show_reactions(post, community, reactions, csrf_token, return_to='') %}
+  {% set summary = reactions.get(post.id) if reactions else none %}
+  {% set mine = summary.mine if summary else none %}
+  {% set likes = summary.likes if summary else 0 %}
+  {% set dislikes = summary.dislikes if summary else 0 %}
+  {% set action = (('/communities/' ~ community.slug ~ '/posts/' ~ post.id) if community else ('/posts/' ~ post.id)) ~ '/reactions' %}
+  <div class="reaction-bar">
+    {% if csrf_token and not post.removed_at %}
+      {% for kind, icon, count, label in [('like', 'thumb_up', likes, 'Like'), ('dislike', 'thumb_down', dislikes, 'Dislike')] %}
+        <form method="post" action="{{ action }}" class="reaction-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <input type="hidden" name="return_to" value="{{ return_to }}">
+          <button class="reaction-button{{ ' is-active' if mine == kind else '' }}" type="submit" aria-pressed="{{ 'true' if mine == kind else 'false' }}" aria-label="{{ label }} this post, {{ count }} so far">
+            <span class="material-symbols-rounded" aria-hidden="true">{{ icon }}</span>
+            <span class="reaction-count">{{ count }}</span>
+          </button>
+        </form>
+      {% endfor %}
+    {% else %}
+      <span class="reaction-static"><span class="material-symbols-rounded" aria-hidden="true">thumb_up</span><span class="reaction-count">{{ likes }}</span></span>
+      <span class="reaction-static"><span class="material-symbols-rounded" aria-hidden="true">thumb_down</span><span class="reaction-count">{{ dislikes }}</span></span>
+    {% endif %}
+  </div>
+{% endmacro %}

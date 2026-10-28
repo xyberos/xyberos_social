@@ -1542,3 +1542,58 @@ html[data-density="compact"] .settings-section { padding: 14px; }
   .people-search input { flex-basis: 100%; }
   .people-search .button { width: 100%; justify-content: center; }
 }
+
+  /* Reactions: one verdict per reader, rendered as two forms so the control needs no JavaScript.
+     A signed-out reader — and a withdrawn post — shows the counts without the controls. */
+  .reaction-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .reaction-form {
+    display: contents;
+  }
+
+  .reaction-button,
+  .reaction-static {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1.2;
+  }
+
+  .reaction-button {
+    cursor: pointer;
+  }
+
+  .reaction-button:hover,
+  .reaction-button:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .reaction-button.is-active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .reaction-static {
+    cursor: default;
+  }
+
+  .reaction-count {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reaction-bar .material-symbols-rounded {
+    font-size: 1.05rem;
+  }

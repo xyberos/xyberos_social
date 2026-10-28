@@ -36,7 +36,7 @@
   {% if error == 'invalid-appeal' %}<p class="alert" role="alert">Add a short reason for the appeal.</p>{% endif %}
   {% if error == 'already-appealed' %}<p class="success" role="status">You already appealed this removal.</p>{% endif %}
 
-  {% call show_post_card(post, author, none, author_url, media) %}
+  {% call show_post_card(post, author, none, author_url, media, reactions, csrf_token, current_url) %}
     <div class="thread-actions">
       {% if user and not post.removed_at and user.id == post.author_id %}
         <form method="post" action="/posts/{{ post.id }}/remove">

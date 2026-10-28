@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/avatar.html" import avatar %}
+{% from "partials/reactions.html" import show_reactions %}
 {% block title %}{{ community.name }} | Social+{% endblock %}
 {% block description %}{{ describe(community.description, community.name ~ ' — a community on Social+ where members share posts and comments.') }}{% endblock %}
 {% block robots %}{% if community.visibility == 'public' %}index, follow{% else %}noindex, nofollow{% endif %}{% endblock %}
@@ -98,6 +99,7 @@
           <h3><a href="/communities/{{ community.slug }}/posts/{{ post.id }}">{{ post.title }}</a></h3>
           {% if post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
           <div class="post-actions">
+            {{ show_reactions(post, community, reactions, csrf_token, current_url) }}
             <a class="post-action" href="/communities/{{ community.slug }}/posts/{{ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Open discussion</a>
           </div>
         </article>

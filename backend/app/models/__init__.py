@@ -13,6 +13,7 @@ from app.models.content import (
     ContentReport,
     ModerationAppeal,
     ModerationEvent,
+    PostReaction,
 )
 from app.models.idempotency import IdempotencyKey
 from app.models.messaging import (
@@ -47,6 +48,7 @@ __all__ = [
     "PasswordResetToken",
     "PlatformAuditEvent",
     "Post",
+    "PostReaction",
     "User",
     "UserRelationship",
     "UserSession",

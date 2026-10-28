@@ -14,7 +14,7 @@ from app.api.deps import (
     current_session,
     form_context,
 )
-from app.api.responses import render
+from app.api.responses import relative_target, render
 from app.core import events
 from app.core.database import get_db
 from app.models import AUDIENCES, Comment, ContentReport, ModerationEvent, Post, User
@@ -36,6 +36,7 @@ from app.services.moderation import appeal_for, platform_removal_report
 from app.services.notifications import queue_notification
 from app.services.outbox import enqueue_event
 from app.services import attachments as attachment_service
+from app.services import reactions as reaction_service
 
 router = APIRouter()
 
@@ -140,6 +141,9 @@ def post_detail(
             "comments": roots,
             "csrf_token": browser_session.csrf_token if browser_session else None,
             "reported": reported,
+            "reactions": reaction_service.summaries(
+                database, [post.id], user.id if user else None
+            ),
             "events": events,
             "error": request.query_params.get("error"),
         },
@@ -474,6 +478,9 @@ def personal_post_detail(
             "reported": reported,
             "appeal": appeal,
             "appealable": appealable,
+            "reactions": reaction_service.summaries(
+                database, [post.id], user.id if user else None
+            ),
             "error": request.query_params.get("error"),
         },
     )
@@ -622,3 +629,77 @@ def remove_personal_comment(
     )
     database.commit()
     return RedirectResponse(f"/posts/{post.id}#comments", status_code=303)
+
+
+# Likes and dislikes. A verdict belongs to a reader, so the read rule of the post is the first
+# gate: nobody reacts to content they cannot see. Clicking the same verdict again withdraws it,
+# and the other verdict replaces it, so one reader holds at most one verdict per post.
+
+REACTION_LIMIT = 120
+
+
+def _record_reaction(
+    request: Request,
+    database: Session,
+    post: Post,
+    user: User,
+    kind: str,
+    return_to: str,
+    fallback: str,
+) -> RedirectResponse:
+    if kind not in reaction_service.REACTION_KINDS:
+        raise HTTPException(status_code=422, detail="Choose like or dislike.")
+    if post.removed_at is not None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    # A reaction is cheap and reversible, so the bucket is generous: it exists to stop a script,
+    # not to ration a reader.
+    if not check_rate_limit(client_key(request), "react", limit=REACTION_LIMIT, seconds=60):
+        raise HTTPException(status_code=429, detail="You are reacting too quickly.")
+    reaction_service.apply(database, post_id=post.id, user_id=user.id, kind=kind)
+    database.commit()
+    return RedirectResponse(relative_target(return_to) or fallback, status_code=303)
+
+
+@router.post("/posts/{post_id}/reactions")
+def react_to_personal_post(
+    post_id: UUID,
+    request: Request,
+    kind: str = Form(),
+    csrf_token: str = Form(),
+    return_to: str = Form(""),
+    database: Session = Depends(get_db),
+):
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    post = find_personal_post(database, post_id, user)
+    return _record_reaction(
+        request, database, post, user, kind, return_to, f"/posts/{post.id}"
+    )
+
+
+@router.post("/communities/{slug}/posts/{post_id}/reactions")
+def react_to_community_post(
+    slug: str,
+    post_id: UUID,
+    request: Request,
+    kind: str = Form(),
+    csrf_token: str = Form(),
+    return_to: str = Form(""),
+    database: Session = Depends(get_db),
+):
+    user, _ = authenticated_form_user(request, database, csrf_token)
+    community = find_visible_community(database, slug, user)
+    # Reacting is participation, like commenting, so it needs a membership rather than only a
+    # readable community.
+    require_community_member(database, community, user)
+    post = find_post(database, community, post_id)
+    if is_blocked_between(database, user.id, post.author_id):
+        raise HTTPException(status_code=404, detail="Post not found.")
+    return _record_reaction(
+        request,
+        database,
+        post,
+        user,
+        kind,
+        return_to,
+        f"/communities/{slug}/posts/{post.id}",
+    )

@@ -14,6 +14,7 @@ from app.core.scoping import platform_scope
 from app.models import Community, Post, User, UserRelationship
 from app.services import calls as calls_service
 from app.services import attachments as attachment_service
+from app.services import reactions as reaction_service
 from app.services.outbox import enqueue_event
 from app.services.authorization import (
     is_blocked_between,
@@ -187,6 +188,9 @@ def person_profile(
             "hidden_updates": hidden_updates,
             "posts": posts,
             "media": media,
+            "reactions": reaction_service.summaries(
+                database, [post.id for post in posts], viewer.id
+            ),
             "message": request.query_params.get("message"),
             "csrf_token": browser_session.csrf_token if browser_session else None,
         },

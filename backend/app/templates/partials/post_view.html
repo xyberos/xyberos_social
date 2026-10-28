@@ -4,8 +4,9 @@
    the handle as text because the thread already names the community it belongs to. `media`
    is the verified attachment list for the post, which a personal update may carry. #}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/reactions.html" import show_reactions %}
 {% from "partials/avatar.html" import avatar %}
-{% macro show_post_card(post, author, community, author_url, media=none) %}
+{% macro show_post_card(post, author, community, author_url, media=none, reactions=none, csrf_token=none, return_to='') %}
   <article class="thread-post">
     <div class="post-head">
       {{ avatar(author, 'post-avatar') }}
@@ -27,6 +28,7 @@
       {% if post.body %}<p class="thread-body">{{ post.body }}</p>{% endif %}
       {{ show_post_media(media or []) }}
     {% endif %}
+    {{ show_reactions(post, community, reactions, csrf_token, return_to) }}
     {{ caller() }}
   </article>
 {% endmacro %}

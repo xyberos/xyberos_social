@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/post_media.html" import show_post_media %}
+{% from "partials/reactions.html" import show_reactions %}
 {% from "partials/avatar.html" import avatar %}
 {% block title %}{{ person.display_name }} | Social+{% endblock %}
 {% block robots %}noindex, nofollow{% endblock %}
@@ -64,6 +65,7 @@
             {% if post.title and post.body %}<p class="post-excerpt">{{ post.body[:180] }}{% if post.body|length > 180 %}…{% endif %}</p>{% endif %}
             {{ show_post_media(post_media) }}
             <div class="post-actions">
+              {{ show_reactions(post, communities.get(post.id) if post.community_id else none, reactions, csrf_token, current_url) }}
               <a class="post-action" href="{{ '/communities/' ~ communities[post.id].slug ~ '/posts/' ~ post.id if post.community_id else '/posts/' ~ post.id }}"><span class="material-symbols-rounded" aria-hidden="true">forum</span>Comments</a>
             </div>
           </article>
