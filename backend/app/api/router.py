@@ -16,6 +16,7 @@ from app.api.routes import (
     pages,
     people,
     post_media,
+    pwa,
     seo,
 )
 
@@ -23,6 +24,7 @@ api_router = APIRouter()
 
 for route_module in (
     health,
+    pwa,
     seo,
     pages,
     identity,

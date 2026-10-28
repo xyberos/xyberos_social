@@ -2,6 +2,9 @@
 {% from "partials/avatar.html" import avatar %}
 {% block title %}{{ peer.user.display_name if conversation.kind == 'direct' and peer else conversation.title }} | Chat | Social+{% endblock %}
 {% block robots %}noindex, nofollow{% endblock %}
+{# A conversation is the one screen that should fill the phone: the composer belongs under the
+   thumb, not wherever the content happens to end. #}
+{% block body_class %} chat-view{% endblock %}
 {% block content %}
 <section class="chat-layout">
   <a class="back-link" href="/conversations">← Inbox</a>
@@ -124,7 +127,10 @@
       <form id="message-form" method="post" action="/conversations/{{ conversation.id }}/messages" class="message-compose">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="visually-hidden" for="message-body">Write a message</label>
-        <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message or attach a file"></textarea>
+        {# The placeholder stays short enough to fit one line on a narrow phone: a wrapping
+           placeholder is clipped, because the field is one row until a message is typed. The
+           attach button carries its own label, so the field does not have to name it. #}
+        <textarea id="message-body" name="body" rows="1" maxlength="5000" placeholder="Write a message"></textarea>
         <label class="message-attach" for="message-attachments" title="Attach files">
           <span class="material-symbols-rounded" aria-hidden="true">attach_file</span>
           <span class="visually-hidden">Attach files</span>

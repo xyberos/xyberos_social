@@ -3,8 +3,17 @@
 <html lang="en"{% if theme_effective %} data-theme="{{ theme_effective }}"{% endif %} data-theme-choice="{{ theme_choice }}" data-preset="{{ appearance_preset }}" data-background="{{ background_style }}" data-density="{{ display_density }}">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# `viewport-fit=cover` is what makes the safe-area insets below non-zero on a notched
+       device; without it the tab bar's padding is inert. `resizes-content` makes the soft
+       keyboard shrink the layout viewport instead of covering the chat composer. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="color-scheme" content="{{ theme_effective or 'light dark' }}">
+    {# The browser chrome follows the theme, so an installed or in-app view does not frame a
+       forest page in white. #}
+    <meta name="theme-color" content="#245b48" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#151b18" media="(prefers-color-scheme: dark)">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <!-- htmx otherwise injects its indicator stylesheet inline, which the application's CSP
          forbids and which this app does not use: no template renders a .htmx-indicator. -->
     <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
@@ -48,7 +57,7 @@
     {% endif %}
   </head>
 
-  <body class="{{ 'signed-in' if user is defined and user else '' }}">
+  <body class="{{ 'signed-in' if user is defined and user else '' }}{% block body_class %}{% endblock %}">
 
     <!-- Activated and functional skip link for optimal accessibility -->
     <a class="skip-link sr-only" href="#main-content">Skip to content</a>
@@ -64,7 +73,10 @@
 
           {% if user is defined and user %}
             <nav class="topbar-actions" aria-label="Main navigation">
-              <a class="topbar-icon" href="/conversations" title="Chat" aria-label="Chat" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}>
+              {# Chat lives in the tab bar on a phone, so the duplicate icon is desktop-only. The
+                 bell stays on every width: a notification is something you glance at, and the
+                 tab bar spends its five slots on destinations. #}
+              <a class="topbar-icon topbar-icon-wide" href="/conversations" title="Chat" aria-label="Chat" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}>
                 <span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span>
               </a>
               <a class="topbar-icon" href="/notifications" title="Notifications" aria-label="Notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}>
@@ -170,11 +182,13 @@
 
       {% if user is defined and user %}
         <!-- Added hx-boost to mobile bar layout for seamless multi-device browsing transitions -->
+        {# Five thumb-reachable destinations, with Create in the middle where the thumb lands.
+           Alerts is not here: it is the top-bar bell, which is visible at every width. #}
         <nav class="mobile-tabbar" aria-label="Primary mobile navigation" hx-boost="true" hx-target="#main-content" hx-select="#main-content">
           <a href="/dashboard" {% if request.url.path.startswith('/dashboard') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">home</span><span>Dashboard</span></a>
           <a href="/conversations" {% if request.url.path.startswith('/conversations') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span><span>Chat</span><span class="unread-count unread-count-tab" data-chat-unread aria-label="{{ chat_unread_total }} unread message{{ '' if chat_unread_total == 1 else 's' }}"{% if not chat_unread_total %} hidden{% endif %}>{{ chat_unread_total }}</span></a>
+          <a class="tab-create" href="/posts/new" {% if request.url.path.startswith('/posts/new') %}aria-current="page"{% endif %}><span class="tab-create-icon material-symbols-rounded" aria-hidden="true">add</span><span>Create</span></a>
           <a href="/communities" {% if request.url.path.startswith('/communities') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">groups</span><span>Groups</span></a>
-          <a href="/notifications" {% if request.url.path.startswith('/notifications') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">notifications</span><span>Alerts</span></a>
           <a href="/people" {% if request.url.path.startswith('/people') %}aria-current="page"{% endif %}><span class="material-symbols-rounded" aria-hidden="true">person_search</span><span>People</span></a>
         </nav>
       {% endif %}
