@@ -28,6 +28,7 @@
           <span>@{{ person.user.username }}{% if person.follows_you %} · follows you{% endif %} · Member since {{ person.user.created_at.strftime('%b %Y') }}</span>
         </div>
         <div class="person-actions">
+          <a class="button button-quiet" href="/people/{{ person.user.id }}"><span class="material-symbols-rounded" aria-hidden="true">person_search</span>View profile</a>
           {% if not person.blocked and not person.blocked_you %}
             <form method="post" action="/conversations/direct/{{ person.user.id }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

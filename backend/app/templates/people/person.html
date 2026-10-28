@@ -71,9 +71,12 @@
           </article>
         {% endfor %}
       </div>
-    {% elif hidden_updates %}
-      <p class="posts-hint">Personal updates are shared with followers. Follow {{ person.display_name }} to read them.</p>
-    {% else %}
+    {% endif %}
+    {# The audience is part of the page: a reader is told when updates exist that they do not
+       meet the audience for, and what would change that. The count stays private. #}
+    {% if hidden_updates %}
+      <p class="posts-hint">{% if following %}Some updates here are kept private by their author.{% else %}Some updates are shared with followers. Follow {{ person.display_name }} to read them.{% endif %}</p>
+    {% elif not posts %}
       <p class="empty-card">Nothing published yet.</p>
     {% endif %}
   </section>

@@ -432,7 +432,7 @@ def test_personal_update_is_readable_by_followers_only(client_factory):
     stranger_view = stranger.get(f"/people/{person_id}")
     assert stranger_view.status_code == 200
     assert "Followers only." not in stranger_view.text
-    assert "Personal updates are shared with followers." in stranger_view.text
+    assert "Some updates are shared with followers." in stranger_view.text
 
     follower_view = follower.get(f"/people/{person_id}")
     assert "Followers only." in follower_view.text

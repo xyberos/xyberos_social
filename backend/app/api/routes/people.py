@@ -153,9 +153,15 @@ def person_profile(
         .limit(20)
     ).all()
     media = attachment_service.post_media_payloads(database, [post.id for post in posts])
-    # The hint explains an empty list only when updates exist that this viewer may not read.
+    following = is_following(database, viewer.id, person.id)
+    blocked = database.get(UserRelationship, (viewer.id, person.id, "block")) is not None
+    blocked_you = database.get(UserRelationship, (person.id, viewer.id, "block")) is not None
+    # The hint explains an audience this viewer does not meet, whether or not other updates are
+    # visible. It says only that updates exist — a count would publish how much the author keeps
+    # to themselves — and a block is not a reason to follow, so it is not a hint either.
     hidden_updates = (
-        not posts
+        not blocked
+        and not blocked_you
         and database.scalar(
             select(Post.id)
             .where(
@@ -180,11 +186,9 @@ def person_profile(
                 for post in posts
                 if post.community_id is not None
             },
-            "following": is_following(database, viewer.id, person.id),
-            "blocked": database.get(UserRelationship, (viewer.id, person.id, "block"))
-            is not None,
-            "blocked_you": database.get(UserRelationship, (person.id, viewer.id, "block"))
-            is not None,
+            "following": following,
+            "blocked": blocked,
+            "blocked_you": blocked_you,
             "hidden_updates": hidden_updates,
             "posts": posts,
             "media": media,

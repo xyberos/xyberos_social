@@ -541,9 +541,12 @@ appears in four places:
   community post opens in (`templates/partials/post_view.html` and
   `templates/partials/comments_section.html` render both kinds, and
   `templates/partials/comment_tree.html` renders the replies).
-- `/people/{id}` — the author's page in the directory. For an author the reader does not
-  follow it is also the discovery path for an update shared with everyone, and it narrows to
-  the same rows the post view would open.
+- `/people/{id}` — the author's page in the directory, reached from the **View profile** action on
+  every directory row. For an author the reader does not follow it is also the discovery path for
+  an update shared with everyone, and it narrows to the same rows the post view would open. The
+  page also says when updates exist whose audience the reader does not meet — and never how many:
+  a visitor who does not follow is offered the follow as the remedy, while a follower is told only
+  that the author keeps some updates private.
 - `/dashboard` — the `people` source, which is exactly the list of accounts the reader follows
   plus the reader's own posts, so a post published from the landing page reads back there; the
   `communities` source therefore never includes a personal update. The list is narrowed by the
