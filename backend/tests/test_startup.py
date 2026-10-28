@@ -1,13 +1,29 @@
-"""What the application does at startup, and what it deliberately leaves to an operator."""
+"""What the application does at startup, and what it deliberately leaves to an operator.
+
+The storage tests patch the schema check away: it talks to the real database, and what these
+tests are about is the bucket. The schema check has its own file, `test_schema.py`.
+"""
 
 import asyncio
 import logging
 import time
 from types import SimpleNamespace
 
+import pytest
+
 import app.main as main
 
 from app.core.storage import StorageError
+
+
+@pytest.fixture(autouse=True)
+def no_schema_probe(monkeypatch):
+    """The probe is exercised directly in `test_schema.py`; here it would only need a database."""
+
+    async def skip(_settings) -> None:
+        return None
+
+    monkeypatch.setattr(main, "verify_database_schema", skip)
 
 
 def run_lifespan() -> None:

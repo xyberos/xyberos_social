@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     clamav_host: str | None = None
     clamav_port: int = 3310
 
+    # Refuse to serve production traffic when the database is behind this code's migrations.
+    # The alternative — starting anyway — surfaces as a 500 on the first request that touches a
+    # new column, minutes after the deploy reported healthy. An operator who must start without
+    # migrating (a restore, say) sets this to false and gets a warning instead.
+    require_current_schema: bool = True
+
     # The working directory and the repository root are both consulted, so starting uvicorn
     # from `backend/` finds the same `.env` as starting it from the root. Real environment
     # variables always win over either file, which is how a deployment supplies its settings.

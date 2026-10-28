@@ -164,7 +164,9 @@ docker compose exec -T app alembic -c backend/alembic.ini upgrade head
 
 The container deliberately does not apply migrations on startup. Run the second command after
 the first start and whenever a new migration is added; without it, database-backed pages such as
-registration cannot create their browser session.
+registration cannot create their browser session. In production the application refuses to start
+when the database is behind its migrations, so a forgotten upgrade is a startup failure rather
+than a page that 500s; `REQUIRE_CURRENT_SCHEMA=false` overrides that (see `ops/runbooks.md`).
 
 Attachment bytes need object storage:
 
@@ -251,6 +253,7 @@ Create the `social+_test` database once against the Compose PostgreSQL instance 
 ## Operations
 
 - `GET /healthz` is liveness only and has no dependencies, so a database outage never triggers a restart.
+- Startup refuses to serve in production when the database is behind this code's migrations. `app/core/schema.py` reads the head revision from the migration files (not a hard-coded list) and compares it with the `alembic_version` row: a mismatch raises and the previous release keeps serving, instead of the deploy reporting healthy and the first request that touches a new column failing. Outside production it is a warning, so a checkout and the test suite still start; an unreachable database is always only a warning, so a restart during an incident does not extend it. `REQUIRE_CURRENT_SCHEMA=false` is the operator escape hatch for a restore that must start before migrating.
 - `GET /readyz` is readiness: it runs `SELECT 1` and answers `503 {"status": "unavailable"}` when the database is unreachable, so traffic can be drained without killing the process.
 - Every request carries an `X-Request-ID`. An upstream value is reused when it is 8-64 characters of `[A-Za-z0-9._-]`; otherwise the app generates one. The id is returned in the `X-Request-ID` response header, included in the JSON body of an unhandled 500, and attached to every log record written while that request is in flight.
 - Logs are structured JSON whenever `APP_ENV` is not `development`; set `LOG_JSON` to override either way. Request logs carry method, path, status, duration, client, and request id. `/static` responses are not logged and the health probes log at `DEBUG`, and `uvicorn.access` is silenced because the middleware logs requests itself.

@@ -78,8 +78,12 @@ Record: the query or route responsible, and the pool settings before and after.
 
 ## Migration failure
 
-Symptom: a deploy fails on `alembic upgrade head`, or `/readyz` fails right after a schema
-change because the application expects a table that does not exist yet.
+Symptom: a deploy fails on `alembic upgrade head`; or the application refuses to start with
+`the database is at '<revision>' but this code expects '<head>'`; or `/readyz` fails right after a
+schema change because the application expects a table that does not exist yet.
+
+The startup refusal is the good case: the previous release is still serving, and no request has
+reached a handler against the wrong schema.
 
 1. Read the current revision: `alembic -c backend/alembic.ini current`.
 2. Read the failure. A partially applied migration is rolled back by the transactional DDL,
@@ -93,6 +97,10 @@ change because the application expects a table that does not exist yet.
    `pytest backend/tests/test_migrations.py`.
 
 Record: revision before and after, and whether any deploy was half-applied.
+
+If a start is genuinely needed before the schema can be migrated — verifying a restore, for
+instance — `REQUIRE_CURRENT_SCHEMA=false` turns the refusal into a warning. Do not leave it that
+way: the application will then serve pages that fail on a missing column.
 
 ## Restore from backup
 
