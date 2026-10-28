@@ -689,16 +689,21 @@ both procedures.
 ### Appeals
 
 Migration `0024_moderation_appeals` adds `moderation_appeals`, and a removal the queue decided
-can be questioned once by the content's author. The appeal control appears on the author's own
-view of a removed update, and `POST /posts/{post_id}/appeals/post/{post_id}` files it; the open
-appeals appear above the report queue at `/moderation`, where the same role grants or denies.
+can be questioned once by the person whose content was removed. The appeal control appears on the
+author's own view of a removed update, and on a removed comment for the comment's own author;
+`POST /posts/{post_id}/appeals/{target_type}/{target_id}` files it, and the open appeals appear
+above the report queue at `/moderation`, where the same role grants or denies.
+
+A comment appeal belongs to whoever wrote the comment, not to the post's author. The moderator
+removed that person's words, so that person is who the decision was about — and the post author
+may never have written a word of it.
 
 An appeal is only accepted where there is a decision to answer. `file_moderation_appeal` refuses,
 with the same 404 a missing post returns:
 
-- a reader who is not the author — and `find_personal_post` already keeps everyone else out of a
-  removed post;
-- a post nobody removed, which is not an appeal at all;
+- a reader who is not the content's author — and `find_personal_post` already keeps everyone else
+  out of a removed post;
+- content nobody removed, which is not an appeal at all;
 - a withdrawal the author made themselves, because there is no moderator decision behind it;
 - a community moderator's removal, which belongs to that community's owners. The check is
   `platform_removal_report`: a resolved report with no community, so the platform role cannot
@@ -712,6 +717,6 @@ with the appeal's reason as the justification, emit `moderation.appeal.granted` 
 `.denied`, and notify the author. Filing itself is not a privileged change, so it writes the
 `moderation.appeal.filed` outbox event but no audit row.
 
-Two limits are honest rather than hidden: a suspended author cannot file an appeal, because
-suspension ends the session that would file it, and a comment removal is not appealable yet —
-only the update is.
+One limit is honest rather than hidden: a suspended author cannot file an appeal, because
+suspension ends the session that would file it — reinstating the account is an operator action
+(see `ops/runbooks.md`), and an appeal filed afterwards is a fresh one.

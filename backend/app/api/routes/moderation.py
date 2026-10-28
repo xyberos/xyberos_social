@@ -522,12 +522,15 @@ def _appeal_rows(database: Session) -> list[dict]:
         target = database.get(
             Post if appeal.target_type == "post" else Comment, appeal.target_id
         )
+        # `post` is the thread the appeal hangs off, which is the thing a moderator wants to
+        # open; `target` is what was actually removed.
+        post = target if appeal.target_type == "post" else database.get(Post, getattr(target, "post_id", None))
         report = database.get(ContentReport, appeal.report_id) if appeal.report_id else None
         appeals.append(
             {
                 "appeal": appeal,
                 "target": target,
-                "post": target,
+                "post": post,
                 "author": database.get(User, appeal.author_id),
                 "report": report,
             }
@@ -548,16 +551,30 @@ def file_moderation_appeal(
     """The author asks for a removal to be reviewed.
 
     Every refusal is the non-revealing 404 a missing post returns: a reader who cannot see the
-    post, an appeal against someone else's content, a post nobody removed, and a removal this
-    queue did not decide — a community moderator's, or the author's own withdrawal.
+    post, an appeal against someone else's content, content nobody removed, and a removal this
+    queue did not decide — a community moderator's, or an author's own withdrawal.
+
+    A comment is appealable by the person who wrote it, not by the post's author: the moderator
+    removed that person's words, so that person is who the decision was about.
     """
     user, _ = authenticated_form_user(request, database, csrf_token)
     post = find_personal_post(database, post_id, user)
-    if target_type != "post" or target_id != post.id or post.author_id != user.id:
+    if target_type == "post":
+        if target_id != post.id or post.author_id != user.id or post.removed_at is None:
+            raise HTTPException(status_code=404, detail="Content not found.")
+        removal = platform_removal_report(database, "post", post.id)
+    elif target_type == "comment":
+        comment = database.get(Comment, target_id)
+        if (
+            comment is None
+            or comment.post_id != post.id
+            or comment.author_id != user.id
+            or comment.removed_at is None
+        ):
+            raise HTTPException(status_code=404, detail="Content not found.")
+        removal = platform_removal_report(database, "comment", comment.id)
+    else:
         raise HTTPException(status_code=404, detail="Content not found.")
-    if post.removed_at is None:
-        raise HTTPException(status_code=404, detail="Content not found.")
-    removal = platform_removal_report(database, "post", post.id)
     if removal is None:
         raise HTTPException(status_code=404, detail="Content not found.")
     reason = reason.strip()
@@ -565,13 +582,13 @@ def file_moderation_appeal(
         return RedirectResponse(f"/posts/{post.id}?error=invalid-appeal", status_code=303)
     if not allow_request(request, "moderation-appeal"):
         raise HTTPException(status_code=429, detail="Too many appeals. Try again later.")
-    if appeal_for(database, "post", post.id, user.id) is not None:
+    if appeal_for(database, target_type, target_id, user.id) is not None:
         return RedirectResponse(f"/posts/{post.id}?error=already-appealed", status_code=303)
     appeal = ModerationAppeal(
         author_id=user.id,
         report_id=removal.id,
-        target_type="post",
-        target_id=post.id,
+        target_type=target_type,
+        target_id=target_id,
         reason=reason,
     )
     try:
@@ -652,15 +669,31 @@ def resolve_moderation_appeal(
     )
     author = database.get(User, appeal.author_id)
     if author is not None:
+        # A comment's appeal lands on the post that holds it, so the notice is useful either way.
+        post_id = (
+            target.id
+            if appeal.target_type == "post" and target is not None
+            else getattr(target, "post_id", None)
+        )
+        if appeal.target_type == "comment":
+            message = (
+                "A moderator granted your appeal: your comment is visible again."
+                if restoring
+                else "A moderator reviewed your appeal and the comment removal stands."
+            )
+        else:
+            message = (
+                "A moderator granted your appeal: the update is visible again."
+                if restoring
+                else "A moderator reviewed your appeal and the removal stands."
+            )
         queue_notification(
             database,
             author,
             user,
             "moderation",
-            "A moderator granted your appeal: the update is visible again."
-            if restoring
-            else "A moderator reviewed your appeal and the removal stands.",
-            f"/posts/{target.id}" if target is not None else None,
+            message,
+            f"/posts/{post_id}" if post_id is not None else None,
         )
     database.commit()
     return RedirectResponse("/moderation", status_code=303)

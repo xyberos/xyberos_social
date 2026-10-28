@@ -1,11 +1,13 @@
 {# The comment thread under a post view, shared by both kinds of post. `notice` is an optional
    (css class, text) pair shown instead of the composer when the reader may not reply: a locked
    discussion, a removed post, or a community the reader has not joined. An empty
-   `report_url_prefix` hides comment reporting entirely, as a personal update has no moderator. #}
+   `report_url_prefix` hides comment reporting entirely, as a personal update has no moderator.
+   `appeal_prefix` and `appeals` exist only on a personal update, where the platform queue can
+   review a removal; a community removal belongs to that community's owners. #}
 {% from "partials/comment_tree.html" import show_comment %}
 {% from "partials/avatar.html" import avatar %}
 
-{% macro show_comments(post, user, comments, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported, notice) %}
+{% macro show_comments(post, user, comments, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported, notice, appeal_prefix='', appeals=none) %}
   <section id="comments" class="thread-comments" aria-labelledby="comments-title">
     <header class="section-heading"><div><p class="eyebrow">The conversation</p><h2 id="comments-title">Comments</h2></div></header>
     {% if can_comment %}
@@ -20,7 +22,7 @@
       </form>
     {% elif notice %}<p class="{{ notice[0] }}">{{ notice[1] }}</p>{% endif %}
     <div class="comment-list">
-      {% for node in comments %}{{ show_comment(node, user, post, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported) }}{% else %}<p class="empty-state">No comments yet.</p>{% endfor %}
+      {% for node in comments %}{{ show_comment(node, user, post, csrf_token, comments_base, can_comment, can_remove_any_comment, report_url_prefix, reported, appeal_prefix, appeals) }}{% else %}<p class="empty-state">No comments yet.</p>{% endfor %}
     </div>
   </section>
 {% endmacro %}

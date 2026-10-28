@@ -52,9 +52,11 @@
           <span>From @{{ item.author.username if item.author else 'deleted user' }}</span>
           <time datetime="{{ item.appeal.created_at.isoformat() }}">{{ item.appeal.created_at.strftime('%b %d, %Y · %H:%M') }}</time>
         </div>
-        <h2>{{ item.post.title if item.post and item.post.title else 'Removed update' }}</h2>
+        <h2>{% if item.appeal.target_type == 'comment' %}Removed comment{% elif item.post and item.post.title %}{{ item.post.title }}{% else %}Removed update{% endif %}</h2>
+        {% if item.appeal.target_type == 'comment' and item.target %}<p class="reported-context">{{ item.target.body[:240] }}</p>{% endif %}
         <p class="report-reason"><strong>Reason</strong> {{ item.appeal.reason }}</p>
         {% if item.report %}<p class="reported-context">The removal answered a report: {{ item.report.reason }}</p>{% endif %}
+        {% if item.post %}<a class="thread-link" href="/posts/{{ item.post.id }}">Review the thread →</a>{% endif %}
         <div class="report-decisions">
           <form method="post" action="/moderation/appeals/{{ item.appeal.id }}/resolve">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="deny">

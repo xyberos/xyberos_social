@@ -1,9 +1,11 @@
 {# Renders one comment and its replies, for both the community thread and the personal
    thread. The callers differ only in the URLs they build and in who may moderate:
    `comments_base` is the collection endpoint (replies post to it, removal appends
-   `/{id}/remove`), and an empty `report_url_prefix` hides reporting entirely. #}
+   `/{id}/remove`), and an empty `report_url_prefix` hides reporting entirely.
+   `appeal_prefix` is set only on a personal update: a community moderator's removal belongs to
+   that community's owners and is not the platform queue's to review. #}
 {% from "partials/avatar.html" import avatar %}
-{% macro show_comment(node, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported) %}
+{% macro show_comment(node, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported, appeal_prefix='', appeals=none) %}
   {% set comment = node.comment %}
   <article class="comment" id="comment-{{ comment.id }}">
     <div class="comment-meta">
@@ -11,6 +13,21 @@
       <div class="comment-meta-copy"><strong>{{ node.author.display_name }}</strong><span>@{{ node.author.username }}</span><time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%b %d, %Y · %H:%M') }}</time></div>
     </div>
     {% if comment.removed_at %}<p class="removed-copy">This comment was removed.</p>{% else %}<p class="comment-body">{{ comment.body }}</p>{% endif %}
+    {% if comment.removed_at and appeal_prefix and user and user.id == comment.author_id %}
+      {% set existing = appeals.get(comment.id) if appeals else none %}
+      {% if existing %}
+        <p class="muted-status">Appeal {% if existing.status == 'pending' %}submitted, awaiting review{% elif existing.status == 'granted' %}granted{% else %}denied{% endif %}.</p>
+      {% else %}
+        <details class="report-details"><summary>Appeal this removal</summary>
+          <form method="post" action="{{ appeal_prefix }}/comment/{{ comment.id }}" class="report-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="visually-hidden" for="comment-appeal-{{ comment.id }}">Why should this removal be reviewed?</label>
+            <textarea id="comment-appeal-{{ comment.id }}" name="reason" rows="2" maxlength="2000" placeholder="Why should this be restored?" required></textarea>
+            <button class="text-button" type="submit">Send appeal</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
     {% if can_reply and not comment.removed_at %}
       <details class="reply-details"><summary>Reply</summary>
         <form method="post" action="{{ comments_base }}" class="reply-form">
@@ -40,6 +57,6 @@
         </form>
       {% endif %}
     </div>
-    {% if node.children %}<div class="comment-children">{% for child in node.children %}{{ show_comment(child, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported) }}{% endfor %}</div>{% endif %}
+    {% if node.children %}<div class="comment-children">{% for child in node.children %}{{ show_comment(child, user, post, csrf_token, comments_base, can_reply, can_remove_any_comment, report_url_prefix, reported, appeal_prefix, appeals) }}{% endfor %}</div>{% endif %}
   </article>
 {% endmacro %}

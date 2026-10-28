@@ -17,7 +17,7 @@ from app.api.deps import (
 from app.api.responses import relative_target, render
 from app.core import events
 from app.core.database import get_db
-from app.models import AUDIENCES, Comment, ContentReport, ModerationEvent, Post, User
+from app.models import AUDIENCES, Comment, ContentReport, ModerationAppeal, ModerationEvent, Post, User
 from app.core.scoping import account_scope, community_scope
 from app.core.security import check_rate_limit
 from app.services.authorization import (
@@ -439,6 +439,7 @@ def personal_post_detail(
             appeal = appeal_for(database, "post", post.id, user.id)
             appealable = appeal is None
     reported = set()
+    comment_appeals: dict = {}
     if user is not None:
         # The forms the reader has already used, so the page says "Reported" instead of
         # offering the same report twice.
@@ -462,6 +463,20 @@ def personal_post_detail(
                 )
             ).all()
         )
+        # A comment the reader wrote and a moderator removed is theirs to appeal, so the page
+        # needs the state of each one to say "awaiting review" rather than offering it again.
+        comment_appeals = {
+            appeal.target_id: appeal
+            for appeal in database.scalars(
+                select(ModerationAppeal).where(
+                    ModerationAppeal.author_id == user.id,
+                    ModerationAppeal.target_type == "comment",
+                    ModerationAppeal.target_id.in_(
+                        select(Comment.id).where(Comment.post_id == post.id)
+                    ),
+                )
+            ).all()
+        }
     return render(
         request,
         "posts/personal.html",
@@ -478,6 +493,7 @@ def personal_post_detail(
             "reported": reported,
             "appeal": appeal,
             "appealable": appealable,
+            "comment_appeals": comment_appeals,
             "reactions": reaction_service.summaries(
                 database, [post.id], user.id if user else None
             ),

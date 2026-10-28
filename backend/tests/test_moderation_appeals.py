@@ -9,7 +9,7 @@ decision in the audit log.
 from sqlalchemy import select
 
 from app.core import events
-from app.models import ModerationAppeal, Notification, OutboxEvent, PlatformAuditEvent, User
+from app.models import Comment, ModerationAppeal, Notification, OutboxEvent, PlatformAuditEvent, User
 from conftest import csrf_from
 from test_platform_moderation import (
     a_moderator,
@@ -165,3 +165,98 @@ def test_a_non_moderator_cannot_decide_an_appeal(client_factory, database_factor
 
     assert decide(reader, appeal_id, "grant").status_code == 403
     assert stored_appeals(database_factory)[0]["status"] == "pending"
+
+
+def comment_appeal(client, location: str, comment_id, reason: str = "It was fair."):
+    post_id = post_id_of(location)
+    return client.post(
+        f"/posts/{post_id}/appeals/comment/{comment_id}",
+        data={"csrf_token": csrf_from(client.get("/posts/new").text), "reason": reason},
+        follow_redirects=False,
+    )
+
+
+def a_removed_comment_by(author, reader, moderator, database_factory, location):
+    """`reader` replies to `author`'s post, and the moderator removes that reply."""
+    post_id = post_id_of(location)
+    reader.post(
+        f"/posts/{post_id}/comments",
+        data={"csrf_token": csrf_from(reader.get("/posts/new").text), "body": "A sharp reply."},
+        follow_redirects=False,
+    )
+    with database_factory() as database:
+        comment_id = database.scalars(select(Comment.id)).one()
+    report(author, location, target_type="comment", target_id=comment_id, reason="Rude.")
+    assert (
+        resolve(moderator, stored_reports(database_factory)[0]["id"], "remove").status_code == 303
+    )
+    return comment_id
+
+
+def test_a_comment_author_can_appeal_its_removal(client_factory, database_factory):
+    author = client_factory()
+    reader = client_factory()
+    register(author, "author")
+    register(reader, "reader")
+    moderator = a_moderator(client_factory, database_factory)
+    location = publish(author, "The thread is the point.")
+    comment_id = a_removed_comment_by(author, reader, moderator, database_factory, location)
+
+    # The removal was about the reader's words, so the reader is who may question it.
+    reader_page = reader.get(location).text
+    assert "This comment was removed." in reader_page
+    assert "Appeal this removal" in reader_page
+    # The post itself was not removed, so its author has nothing to appeal here.
+    assert "Appeal this removal" not in author.get(location).text
+
+    assert comment_appeal(reader, location, comment_id).status_code == 303
+    filed = stored_appeals(database_factory)
+    assert len(filed) == 1
+    assert filed[0]["status"] == "pending"
+
+    assert "It was fair." in moderator.get("/moderation").text
+    assert decide(moderator, filed[0]["id"], "grant").status_code == 303
+
+    # Restored, and the comment reads again.
+    assert "A sharp reply." in author.get(location).text
+
+
+def test_a_self_withdrawn_comment_is_not_appealable(client_factory, database_factory):
+    author = client_factory()
+    register(author, "author")
+    location = publish(author, "Withdrawn by its author.")
+    post_id = post_id_of(location)
+
+    author.post(
+        f"/posts/{post_id}/comments",
+        data={"csrf_token": csrf_from(author.get("/posts/new").text), "body": "My own reply."},
+        follow_redirects=False,
+    )
+    with database_factory() as database:
+        comment_id = database.scalars(select(Comment.id)).one()
+
+    # The comment's author removes it themselves; nothing for a moderator to review.
+    author.post(
+        f"/posts/{post_id}/comments/{comment_id}/remove",
+        data={"csrf_token": csrf_from(author.get("/posts/new").text)},
+        follow_redirects=False,
+    )
+
+    assert comment_appeal(author, location, comment_id).status_code == 404
+    assert stored_appeals(database_factory) == []
+
+
+def test_someone_elses_removed_comment_is_not_yours_to_appeal(
+    client_factory, database_factory
+):
+    author = client_factory()
+    reader = client_factory()
+    register(author, "author")
+    register(reader, "reader")
+    moderator = a_moderator(client_factory, database_factory)
+    location = publish(author, "A post with a reply.")
+    comment_id = a_removed_comment_by(author, reader, moderator, database_factory, location)
+
+    # The post's author did not write this comment, so the removal is not theirs to question.
+    assert comment_appeal(author, location, comment_id).status_code == 404
+    assert stored_appeals(database_factory) == []

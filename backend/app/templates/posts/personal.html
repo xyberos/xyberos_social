@@ -79,6 +79,6 @@
   {% else %}
     {% set notice = none %}
   {% endif %}
-  {{ show_comments(post, user, comments, csrf_token, comments_base, user and not post.removed_at and not post.is_locked, user and user.id == post.author_id, ('/posts/' ~ post.id ~ '/reports/comment') if user else '', reported, notice) }}
+  {{ show_comments(post, user, comments, csrf_token, comments_base, user and not post.removed_at and not post.is_locked, user and user.id == post.author_id, ('/posts/' ~ post.id ~ '/reports/comment') if user else '', reported, notice, ('/posts/' ~ post.id ~ '/appeals') if user else '', comment_appeals) }}
 </section>
 {% endblock %}
