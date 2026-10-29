@@ -16,10 +16,10 @@ The policy fixes the key, so a client cannot choose where its upload lands.
 """
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 import boto3
@@ -35,6 +35,14 @@ READ_CHUNK_SIZE = 64 * 1024
 
 class StorageError(RuntimeError):
     """Object storage is unavailable or refused the operation."""
+
+
+_T = TypeVar("_T")
+
+
+def error_code(error: ClientError) -> str:
+    """The service's own error code, which is what tells two failures apart."""
+    return str(error.response.get("Error", {}).get("Code", ""))
 
 
 @dataclass(frozen=True)
@@ -54,8 +62,15 @@ class ObjectStorage:
         access_key_id: str | None,
         secret_access_key: str | None,
         use_path_style: bool,
+        cors_origins: Sequence[str] = (),
+        auto_provision: bool = False,
     ) -> None:
         self.bucket = bucket
+        self._cors_origins = tuple(cors_origins)
+        # Healing is a development convenience, not a production behaviour: the local stand-in
+        # keeps its state in memory, so restarting it deletes the bucket, while a real bucket is
+        # an operator's decision that a request process must not quietly revisit.
+        self._auto_provision = auto_provision
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
@@ -120,12 +135,42 @@ class ObjectStorage:
             extra={"event": "storage.cors_applied", "origins": len(list(origins))},
         )
 
+    def _call(self, action: str, operation: Callable[[], _T]) -> _T:
+        """Run one client operation, re-creating a vanished development bucket at most once.
+
+        Startup provisions the bucket, which only helps a process that boots after the storage
+        service is back. Healing here means the first request after either container restarts
+        repairs the bucket instead of failing an upload that has nothing wrong with it.
+        """
+        try:
+            return operation()
+        except ClientError as error:
+            if not (self._auto_provision and error_code(error) == "NoSuchBucket"):
+                raise StorageError(action) from error
+            self._provision()
+            try:
+                return operation()
+            except (BotoCoreError, ClientError) as retried:
+                raise StorageError(action) from retried
+        except BotoCoreError as error:
+            raise StorageError(action) from error
+
+    def _provision(self) -> None:
+        """Re-create a development bucket that has gone missing."""
+        try:
+            self.ensure_bucket(self._cors_origins)
+        except StorageError:
+            # The retried operation reports the outcome, so a failed heal neither masks it nor
+            # turns one failure into a different one.
+            pass
+
     def presign_post(
         self, key: str, *, content_type: str, max_bytes: int, expires_in: int
     ) -> dict[str, Any]:
         """A short-lived, single-key upload target with the size ceiling enforced by S3."""
-        try:
-            return self._client.generate_presigned_post(
+        return self._call(
+            "could not issue an upload target",
+            lambda: self._client.generate_presigned_post(
                 Bucket=self.bucket,
                 Key=key,
                 Fields={"Content-Type": content_type},
@@ -134,19 +179,23 @@ class ObjectStorage:
                     ["content-length-range", 1, max_bytes],
                 ],
                 ExpiresIn=expires_in,
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError("could not issue an upload target") from error
+            ),
+        )
 
     def head(self, key: str) -> StoredObject | None:
-        try:
-            metadata = self._client.head_object(Bucket=self.bucket, Key=key)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
-                return None
-            raise StorageError(f"could not inspect object {key!r}") from error
-        except BotoCoreError as error:
-            raise StorageError(f"could not inspect object {key!r}") from error
+        def fetch() -> dict[str, Any] | None:
+            try:
+                return self._client.head_object(Bucket=self.bucket, Key=key)
+            except ClientError as error:
+                # A bucket that is present but holds no such object is a normal answer, and it
+                # must not be mistaken for a bucket that needs re-creating.
+                if error_code(error) in {"404", "NoSuchKey", "NotFound"}:
+                    return None
+                raise
+
+        metadata = self._call(f"could not inspect object {key!r}", fetch)
+        if metadata is None:
+            return None
         return StoredObject(
             key=key,
             size=int(metadata.get("ContentLength", 0)),
@@ -154,11 +203,10 @@ class ObjectStorage:
         )
 
     def get_bytes(self, key: str) -> bytes:
-        try:
-            response = self._client.get_object(Bucket=self.bucket, Key=key)
-            return response["Body"].read()
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not read object {key!r}") from error
+        return self._call(
+            f"could not read object {key!r}",
+            lambda: self._client.get_object(Bucket=self.bucket, Key=key)["Body"].read(),
+        )
 
     def iter_chunks(
         self, key: str, *, chunk_size: int = READ_CHUNK_SIZE, start: int = 0, length: int | None = None
@@ -172,10 +220,10 @@ class ObjectStorage:
         if start or length is not None:
             end = "" if length is None else str(start + length - 1)
             kwargs["Range"] = f"bytes={start}-{end}"
-        try:
-            body = self._client.get_object(**kwargs)["Body"]
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not read object {key!r}") from error
+        body = self._call(
+            f"could not read object {key!r}",
+            lambda: self._client.get_object(**kwargs)["Body"],
+        )
         try:
             yield from body.iter_chunks(chunk_size)
         except (BotoCoreError, ClientError) as error:
@@ -184,42 +232,43 @@ class ObjectStorage:
             body.close()
 
     def put_bytes(self, key: str, payload: bytes, *, content_type: str) -> None:
-        try:
-            self._client.put_object(
+        self._call(
+            f"could not write object {key!r}",
+            lambda: self._client.put_object(
                 Bucket=self.bucket, Key=key, Body=payload, ContentType=content_type
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not write object {key!r}") from error
+            ),
+        )
 
     def copy_object(self, source_key: str, target_key: str, *, content_type: str) -> None:
         """Copy inside the storage service, so a deduplicated upload crosses no client link."""
-        try:
-            self._client.copy_object(
+        self._call(
+            f"could not copy object {source_key!r}",
+            lambda: self._client.copy_object(
                 Bucket=self.bucket,
                 Key=target_key,
                 CopySource={"Bucket": self.bucket, "Key": source_key},
                 ContentType=content_type,
                 MetadataDirective="REPLACE",
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not copy object {source_key!r}") from error
+            ),
+        )
 
     def create_multipart(self, key: str, *, content_type: str) -> str:
         """Open an S3 multipart upload and return the id the client's parts belong to."""
-        try:
-            response = self._client.create_multipart_upload(
+        response = self._call(
+            f"could not start a multipart upload for {key!r}",
+            lambda: self._client.create_multipart_upload(
                 Bucket=self.bucket, Key=key, ContentType=content_type
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not start a multipart upload for {key!r}") from error
+            ),
+        )
         return response["UploadId"]
 
     def presign_part(
         self, key: str, upload_id: str, part_number: int, *, expires_in: int
     ) -> str:
         """A URL for one part. The part's ETag comes back from the PUT response."""
-        try:
-            return self._client.generate_presigned_url(
+        return self._call(
+            "could not issue a part upload target",
+            lambda: self._client.generate_presigned_url(
                 "upload_part",
                 Params={
                     "Bucket": self.bucket,
@@ -228,54 +277,54 @@ class ObjectStorage:
                     "PartNumber": part_number,
                 },
                 ExpiresIn=expires_in,
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError("could not issue a part upload target") from error
+            ),
+        )
 
     def complete_multipart(
         self, key: str, upload_id: str, parts: list[dict[str, Any]]
     ) -> None:
-        try:
-            self._client.complete_multipart_upload(
+        self._call(
+            f"could not complete the multipart upload for {key!r}",
+            lambda: self._client.complete_multipart_upload(
                 Bucket=self.bucket,
                 Key=key,
                 UploadId=upload_id,
                 MultipartUpload={"Parts": parts},
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not complete the multipart upload for {key!r}") from error
+            ),
+        )
 
     def abort_multipart(self, key: str, upload_id: str) -> None:
         """Discard uncompleted parts. An upload that is already gone is not a failure."""
-        try:
-            self._client.abort_multipart_upload(
-                Bucket=self.bucket, Key=key, UploadId=upload_id
-            )
-        except ClientError as error:
-            code = error.response.get("Error", {}).get("Code")
-            if code in {"NoSuchUpload", "404", "NotFound"}:
-                return
-            raise StorageError(f"could not abort the multipart upload for {key!r}") from error
-        except BotoCoreError as error:
-            raise StorageError(f"could not abort the multipart upload for {key!r}") from error
+
+        def discard() -> None:
+            try:
+                self._client.abort_multipart_upload(
+                    Bucket=self.bucket, Key=key, UploadId=upload_id
+                )
+            except ClientError as error:
+                if error_code(error) in {"NoSuchUpload", "404", "NotFound"}:
+                    return
+                raise
+
+        self._call(f"could not abort the multipart upload for {key!r}", discard)
 
     def delete(self, key: str) -> None:
         """Delete one object. A missing object is not an error: deletion is idempotent."""
-        try:
-            self._client.delete_object(Bucket=self.bucket, Key=key)
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError(f"could not delete object {key!r}") from error
+        self._call(
+            f"could not delete object {key!r}",
+            lambda: self._client.delete_object(Bucket=self.bucket, Key=key),
+        )
 
     def delete_many(self, keys: list[str]) -> None:
         if not keys:
             return
-        try:
-            self._client.delete_objects(
+        self._call(
+            "could not delete objects",
+            lambda: self._client.delete_objects(
                 Bucket=self.bucket,
                 Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
-            )
-        except (BotoCoreError, ClientError) as error:
-            raise StorageError("could not delete objects") from error
+            ),
+        )
 
 
 @lru_cache
@@ -288,11 +337,13 @@ def get_storage() -> ObjectStorage:
         access_key_id=settings.s3_access_key_id,
         secret_access_key=settings.s3_secret_access_key,
         use_path_style=settings.s3_use_path_style,
+        cors_origins=browser_origins(),
+        auto_provision=settings.app_env == "development",
     )
 
 
-def bootstrap_bucket() -> list[str]:
-    """Create the bucket and allow browser uploads from the application's own origin."""
+def browser_origins() -> list[str]:
+    """The origins a browser posts uploads from, which the bucket's CORS policy must name."""
     settings = get_settings()
     origins = {settings.app_base_url.rstrip("/")}
     if settings.app_env != "production":
@@ -303,6 +354,11 @@ def bootstrap_bucket() -> list[str]:
             # the configured origin and the one in the address bar silently blocks uploads.
             origins.add(f"{parsed.scheme}://localhost{port}")
             origins.add(f"{parsed.scheme}://127.0.0.1{port}")
-    resolved = sorted(origins)
-    get_storage().ensure_bucket(resolved)
-    return resolved
+    return sorted(origins)
+
+
+def bootstrap_bucket() -> list[str]:
+    """Create the bucket and allow browser uploads from the application's own origin."""
+    origins = browser_origins()
+    get_storage().ensure_bucket(origins)
+    return origins
